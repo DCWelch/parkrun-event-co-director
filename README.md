@@ -1,7 +1,13 @@
 # parkrun Event Co-Director
 
-parkrun event data organizer and summarizer.
-Pulls data from the parkrun website for a specific event, saves it in .csv files on your local machine, and creates some visualizations.
+parkrun event data organizer and summarizer:
+ - Pulls data from the parkrun website for a specific parkrun
+ - Saves event-specific, event summary, per-parkrunner, and age group data breakdowns in .csv files on your local machine
+ - Creates some visualizations
+
+## How to Use
+
+
 
 ## Directory Structure
 
@@ -42,8 +48,8 @@ parkrun_event_data_organizer/       ← top
 │
 └── README.md
 
+## Other Helpful Resources
 
-Similar to the following:
+The following links send you to other helpful tools for parkrun Event Directors, Volunteer Coordinators and/or Social Media Managers:
  - https://chromewebstore.google.com/detail/parkrun-event-summary/nfdbgfodockojbhmenjohphggbokgmaf
  - https://github.com/leoz0214/Parkrun-Data-Scraper
-
