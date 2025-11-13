@@ -12,7 +12,7 @@ parkrun event data organizer and summarizer:
 ## Directory Structure
 
 - `parkrun_event_data_organizer/` — top-level project folder  
-  - `parkrun_event_data_organizer.py` — main scraper / data builder / calls visualization scripts  
+  - `parkrun_event_data_organizer.py` — main script - scrapes data from parkrun website, organizes into .csv files, and calls visualization scripts  
 
   - `data/`
     - `event_results/` — per-event results (scraped from parkrun website)  
