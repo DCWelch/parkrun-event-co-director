@@ -1,5 +1,9 @@
 # parkrun Event Co-Director
-parkrun event data organizer and summarizer. Pulls data from the parkrun website for a specific event, saves it in .csv files on your local machine, and creates some visualizations.
+
+parkrun event data organizer and summarizer.
+Pulls data from the parkrun website for a specific event, saves it in .csv files on your local machine, and creates some visualizations.
+
+## Directory Structure
 
 parkrun_event_data_organizer/       ← top
 │
