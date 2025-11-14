@@ -10,8 +10,11 @@ parkrun event data organizer and summarizer:
 If you are an event director who wants the outputs from this tool, but doesn't want to run it themselves, feel free to email farmpond@parkrun.com. I would be happy to generate all the files for you :)
 
 `git clone https://github.com/DCWelch/parkrun-event-co-director.git`
+
 `cd parkrun-event-co-director`
+
 `pip install -r requirements.txt`
+
 `python parkrun_event_data_organizer.py`
 
 ## Directory Structure
