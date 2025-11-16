@@ -4,8 +4,6 @@
 
 <img width="1920" height="1056" alt="course_record_best_overall_table" src="https://github.com/user-attachments/assets/f38abbf4-23ba-4054-950d-1a0ae7e470b6" />
 
-<img width="1747" height="768" alt="top_10_agegrades" src="https://github.com/user-attachments/assets/a7a5139a-d2d2-4d02-90f6-950e30beee14" />
-
 parkrun event data organizer and summarizer:
  - Pulls data from the parkrun website for a specific parkrun
  - Saves event-specific, event summary, per-parkrunner, and age group data breakdowns in .csv files on your local machine
