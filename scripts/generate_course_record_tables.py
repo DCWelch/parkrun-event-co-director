@@ -72,44 +72,6 @@ LOGO_ALPHA   = 0.12
 # Small vertical tweak to push text down inside cells
 CELL_Y_OFFSET = 0 # in table cell coordinates
 
-# ------------------------- Font Import -------------------------
-
-def ensure_opensans():
-    font_dir = ASSETS_DIR / "fonts"
-    font_dir.mkdir(exist_ok=True)
-
-    # Correct raw URLs from the google/fonts repo
-    files = {
-        "OpenSans-Regular.ttf": (
-            "https://github.com/google/fonts/raw/master/apache/opensans/"
-            "OpenSans-Regular.ttf"
-        ),
-        "OpenSans-Bold.ttf": (
-            "https://github.com/google/fonts/raw/master/apache/opensans/"
-            "OpenSans-Bold.ttf"
-        ),
-    }
-
-    for fname, url in files.items():
-        fpath = font_dir / fname
-        if not fpath.exists():
-            print(f"Downloading {fname} ...")
-            r = requests.get(url, timeout=30)
-            r.raise_for_status()
-            fpath.write_bytes(r.content)
-            print(f"Saved {fpath}")
-
-    # Safely register all TTFs we just downloaded
-    for fpath in font_dir.glob("*.ttf"):
-        try:
-            fm.fontManager.addfont(str(fpath))
-        except Exception as e:
-            print(f"Warning: could not load font {fpath}: {e}")
-
-    # Use Open Sans globally
-    plt.rcParams["font.family"] = "Open Sans"
-    plt.rcParams["font.weight"] = "regular"
-
 # ------------------------- Utilities -------------------------
 
 TIME_RE = re.compile(r"^\s*(?:(\d+):)?(\d{1,2}):(\d{2})\s*$")

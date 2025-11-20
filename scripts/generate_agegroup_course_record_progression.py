@@ -45,7 +45,7 @@ AGEGROUP_VIS_DIR.mkdir(parents=True, exist_ok=True)
 
 PARKRUN_LOGO = ASSETS_DIR / "parkrun_logo_white.png"
 
-# ------------------------- Style constants (match main CR script) -------------------------
+# ------------------------- Style constants -------------------------
 
 PARKRUN_PURPLE = "#4B2E83"     # background
 NEAR_WHITE     = "#F4F4F6"     # labels/grid

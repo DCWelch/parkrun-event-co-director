@@ -36,7 +36,7 @@ import requests
 # ========================= Config & Paths =========================
 
 HERE = Path(__file__).resolve()
-PROJECT_ROOT = HERE.parents[1]  # adjust if your repo layout differs
+PROJECT_ROOT = HERE.parents[1]
 DATA_DIR = PROJECT_ROOT / "data"
 VIS_DIR = PROJECT_ROOT / "visualizations"
 ASSETS_DIR = PROJECT_ROOT / "assets"
@@ -48,7 +48,6 @@ EVENT_SERIES_CSV = DATA_DIR / "event_series_summary.csv"
 PARKRUNNER_SUMMARY_CSV = DATA_DIR / "participants_master.csv"
 
 # ---- Column names in parkrunner summary CSV ----
-# Adjust these if your schema is different:
 NAME_COL            = "parkrunner"
 GENDER_COL          = "Gender"
 AGE_GROUP_COL       = "Age Group"
@@ -81,41 +80,6 @@ PARKRUN_LOGO = ASSETS_DIR / "parkrun_logo_white.png"
 
 VIS_DIR.mkdir(parents=True, exist_ok=True)
 LEADERBOARD_DIR.mkdir(parents=True, exist_ok=True)
-
-# ========================= Font handling =========================
-
-def ensure_opensans():
-    font_dir = ASSETS_DIR / "fonts"
-    font_dir.mkdir(exist_ok=True)
-
-    files = {
-        "OpenSans-Regular.ttf": (
-            "https://github.com/google/fonts/raw/master/apache/opensans/"
-            "OpenSans-Regular.ttf"
-        ),
-        "OpenSans-Bold.ttf": (
-            "https://github.com/google/fonts/raw/master/apache/opensans/"
-            "OpenSans-Bold.ttf"
-        ),
-    }
-
-    for fname, url in files.items():
-        fpath = font_dir / fname
-        if not fpath.exists():
-            print(f"Downloading {fname} ...")
-            r = requests.get(url, timeout=30)
-            r.raise_for_status()
-            fpath.write_bytes(r.content)
-            print(f"Saved {fpath}")
-
-    for fpath in font_dir.glob("*.ttf"):
-        try:
-            fm.fontManager.addfont(str(fpath))
-        except Exception as e:
-            print(f"Warning: could not load font {fpath}: {e}")
-
-    plt.rcParams["font.family"] = "Open Sans"
-    plt.rcParams["font.weight"] = "regular"
 
 # ========================= Utilities =========================
 
@@ -465,7 +429,6 @@ def make_top_count(df: pd.DataFrame, col: str, top_n: int, label: str) -> pd.Dat
 # ========================= Main =========================
 
 def main(top_n: int):
-    ensure_opensans()
     event_name = load_event_name(default_name="Unknown")
     df = load_parkrunner_summary()
 

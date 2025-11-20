@@ -1,2 +1,4 @@
 /visualizations/
 /data/
+/generate_sample_data.py
+__pycache__/
