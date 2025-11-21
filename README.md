@@ -16,7 +16,7 @@ If you would like to run the tool locally:
 
 ### Requirements
 
-This project requires Python 3.8+
+Python 3.8+
 
 ### Setup
 
