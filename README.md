@@ -8,24 +8,32 @@ parkrun event data organizer and summarizer:
 
 <img width="1920" height="1056" alt="course_record_best_overall_table" src="https://github.com/user-attachments/assets/f38abbf4-23ba-4054-950d-1a0ae7e470b6" />
 
-## How to Use
+## Running the Tool
 
-If you are an event director who wants the outputs from this tool, but doesn't want to run it themselves, feel free to email farmpond@parkrun.com. I would be happy to generate all the files for you :)
+If you're a parkrun Event Director who wants the outputs from this tool, but doesn't want to run it themselves, feel free to email farmpond@parkrun.com. I would be happy to generate everything and send it to you :)
 
-If you would like to run things yourself, I tried to make it as simple as I could:
+If you would like to run the tool locally:
 
-`git clone https://github.com/DCWelch/parkrun-event-co-director.git`
+### Setup
 
-`cd parkrun-event-co-director`
+`git clone https://github.com/DCWelch/parkrun-event-co-director.git
+cd parkrun-event-co-director
+pip install -r requirements.txt`
 
-`pip install -r requirements.txt`
+### Config
+
+Modify the "EVENT DEFAULTS" in parkrun_config.py to match the parkrun you want to analyze, namely:
+ - ROOT_URL_DEFAULT (e.g. "https://www.parkrun.us/farmpond/")
+ - EVENT_NAME_DEFAULT (e.g. "Farm Pond"... Exclude "parkrun", that word is added automatically)
+ - Others are less critical, but can modify the results to suit your specific needs
+
+### Run
 
 `python parkrun_event_data_organizer.py`
 
-## Directory Structure
+## Outputs
 
-- `parkrun_event_data_organizer/` — top-level project folder  
-  - `parkrun_event_data_organizer.py` — main script 
+- `parkrun_event_data_organizer/` — top-level project folder
 
   - `data/`
     - `event_results/` — per-event results (scraped from parkrun website)  
@@ -48,19 +56,10 @@ If you would like to run things yourself, I tried to make it as simple as I coul
     - `participants_per_event.png`  
     - `volunteers_per_event.png`  
 
-  - `scripts/` — helper scripts  
-    - `generate_course_record_progression.py`  
-    - `generate_event_counts.py`  
-    - `(other analysis scripts)`  
-
-  - `assets/` — various assets  
-    - `parkrun_logo_white.png`  
-
-  - `README.md`
-
 ## Other Helpful Resources
 
 The following links send you to other helpful tools for parkrun Event Directors, Volunteer Coordinators and/or Social Media Managers:
  - https://github.com/AlanLyttonJones/Age-Grade-Tables
  - https://chromewebstore.google.com/detail/parkrun-event-summary/nfdbgfodockojbhmenjohphggbokgmaf
  - https://github.com/leoz0214/Parkrun-Data-Scraper
+ - https://github.com/FingerLakesRunnersClub/AgeGradeCalculator
