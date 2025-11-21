@@ -19,31 +19,38 @@ Outputs:
 """
 
 from __future__ import annotations
-import re
 from pathlib import Path
 from typing import Optional, Any, List, Dict
 
-import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-import matplotlib.font_manager as fm
-from matplotlib.offsetbox import OffsetImage, AnnotationBbox
-from PIL import Image
 
-import requests
+from parkrun_config import (
+    # Paths
+    VIS_DIR,
+    AGEGROUP_VIS_DIR,
+    # Style constants
+    PARKRUN_PURPLE,
+    NEAR_WHITE,
+    PARKRUN_YELLOW,
+    PARKRUN_TEAL,
+    TITLE_SIZE,
+    HEADER_SIZE,
+    CELL_SIZE,
+    BORDER_LW,
+    LOGO_ALPHA,
+    CELL_Y_OFFSET,
+    # Time helpers
+    parse_time_to_seconds,
+    fmt_sec_mmss,  # (not used here yet, but imported for completeness)
+    # Plot helpers
+    add_centered_background_logo,
+    load_event_name,
+)
 
-# ------------------------- Paths -------------------------
-
-HERE = Path(__file__).resolve()
-PROJECT_ROOT = HERE.parents[1]            # parkrun_event_data_organizer/
-DATA_DIR = PROJECT_ROOT / "data"
-VIS_DIR = PROJECT_ROOT / "visualizations"
-ASSETS_DIR = PROJECT_ROOT / "assets"
-
-AGEGROUP_VIS_DIR = VIS_DIR / "agegroup_course_records"
+# ------------------------- File paths -------------------------
 
 CR_SERIES_CSV       = VIS_DIR / "course_record_progression_series.csv"
-EVENT_SERIES_CSV    = DATA_DIR / "event_series_summary.csv"
 
 BEST_TIMES_TABLE_PNG     = VIS_DIR / "course_record_best_times_table.png"
 BEST_AGEGRADES_TABLE_PNG = VIS_DIR / "course_record_best_agegrades_table.png"
@@ -51,74 +58,8 @@ BEST_OVERALL_TABLE_PNG   = VIS_DIR / "course_record_best_overall_table.png"
 AGEGROUP_BEST_TIMES_PNG  = VIS_DIR / "agegroup_course_record_best_times_table.png"
 AGEGROUP_BEST_TIMES_CSV  = VIS_DIR / "agegroup_course_record_best_times.csv"
 
-PARKRUN_LOGO = ASSETS_DIR / "parkrun_logo_white.png"
 
-VIS_DIR.mkdir(parents=True, exist_ok=True)
-AGEGROUP_VIS_DIR.mkdir(parents=True, exist_ok=True)
-
-# ------------------------- Style constants (match CR charts) -------------------------
-
-PARKRUN_PURPLE = "#4B2E83"     # background
-NEAR_WHITE     = "#F4F4F6"     # labels/grid
-PARKRUN_YELLOW = "#FFA300"     # male highlight
-PARKRUN_TEAL   = "#10ECCC"     # female highlight
-
-TITLE_SIZE   = 26
-HEADER_SIZE  = 14
-CELL_SIZE    = 12
-BORDER_LW    = 1.2
-LOGO_ALPHA   = 0.12
-
-# Small vertical tweak to push text down inside cells
-CELL_Y_OFFSET = 0 # in table cell coordinates
-
-# ------------------------- Utilities -------------------------
-
-TIME_RE = re.compile(r"^\s*(?:(\d+):)?(\d{1,2}):(\d{2})\s*$")
-
-def parse_time_to_seconds(val) -> Optional[int]:
-    if val is None or (isinstance(val, float) and pd.isna(val)):
-        return None
-    s = str(val).strip()
-    if s in ("", "-", "—", "DNF", "None", "nan", "NaN"):
-        return None
-    m = TIME_RE.match(s)
-    if not m:
-        return None
-    h = int(m.group(1)) if m.group(1) else 0
-    mm = int(m.group(2))
-    ss = int(m.group(3))
-    return h * 3600 + mm * 60 + ss
-
-def fmt_sec_mmss(sec: Optional[float]) -> str:
-    if sec is None or pd.isna(sec):
-        return ""
-    sec = int(round(float(sec)))
-    h = sec // 3600
-    m = (sec % 3600) // 60
-    s = sec % 60
-    return f"{h}:{m:02d}:{s:02d}" if h > 0 else f"{m}:{s:02d}"
-
-def _add_centered_background_logo(fig: plt.Figure, alpha: float = LOGO_ALPHA):
-    if not PARKRUN_LOGO.exists():
-        return
-    try:
-        img = Image.open(PARKRUN_LOGO).convert("RGBA")
-    except Exception:
-        return
-
-    fig_w, fig_h = fig.get_size_inches()
-    fig_h_px = fig_h * fig.dpi
-    zoom = fig_h_px / img.height
-
-    oi = OffsetImage(img, zoom=zoom, alpha=alpha)
-    ab = AnnotationBbox(
-        oi, (0.5, 0.5),
-        xycoords=fig.transFigure,
-        frameon=False,
-        zorder=0
-    )
-    fig.add_artist(ab)
+# ------------------------- Table styling helpers -------------------------
 
 def _style_table_cells(table, df: pd.DataFrame, highlight_gender: bool):
     """Common styling + vertical-centering tweak."""
@@ -157,7 +98,12 @@ def _style_table_cells(table, df: pd.DataFrame, highlight_gender: bool):
                 gcell.get_text().set_color(PARKRUN_PURPLE)
                 gcell.set_linewidth(BORDER_LW)
 
-def _draw_table(df, title, outpath, highlight_gender=True, extra_top_margin=0.0):
+
+def _draw_table(df: pd.DataFrame,
+                title: str,
+                outpath: Path,
+                highlight_gender: bool = True,
+                extra_top_margin: float = 0.0) -> None:
     n_rows, n_cols = df.shape
 
     height = max(3.0, 0.40 * n_rows + 0.8)
@@ -168,7 +114,7 @@ def _draw_table(df, title, outpath, highlight_gender=True, extra_top_margin=0.0)
     fig.patch.set_facecolor(PARKRUN_PURPLE)
     ax.set_facecolor(PARKRUN_PURPLE)
 
-    _add_centered_background_logo(fig, alpha=LOGO_ALPHA)
+    add_centered_background_logo(fig, alpha=LOGO_ALPHA)
     ax.set_axis_off()
 
     display_df = df.copy()
@@ -247,10 +193,11 @@ def _draw_table(df, title, outpath, highlight_gender=True, extra_top_margin=0.0)
     fig.savefig(outpath, dpi=160, facecolor=PARKRUN_PURPLE)
     plt.close(fig)
 
+
 def _draw_combined_course_records(best_times_df: pd.DataFrame,
                                   best_agegrades_df: pd.DataFrame,
                                   title: str,
-                                  outpath: Path):
+                                  outpath: Path) -> None:
     """
     Draw a single image with two stacked tables:
       - "Times"
@@ -271,7 +218,7 @@ def _draw_combined_course_records(best_times_df: pd.DataFrame,
     )
 
     fig.patch.set_facecolor(PARKRUN_PURPLE)
-    _add_centered_background_logo(fig, alpha=LOGO_ALPHA)
+    add_centered_background_logo(fig, alpha=LOGO_ALPHA)
 
     # --- Overall title ---
     fig.suptitle(
@@ -283,7 +230,7 @@ def _draw_combined_course_records(best_times_df: pd.DataFrame,
     )
 
     # --- Helper for each subtable ---
-    def draw_subtable(ax, df, subtitle: str, bbox):
+    def draw_subtable(ax, df: pd.DataFrame, subtitle: str, bbox):
         ax.set_facecolor(PARKRUN_PURPLE)
         ax.set_axis_off()
 
@@ -296,7 +243,7 @@ def _draw_combined_course_records(best_times_df: pd.DataFrame,
         )
 
         display_df = df.copy().astype(str)
-        
+
         # Widen parkrunner column by ~50%
         col_widths = None
         if "parkrunner" in display_df.columns:
@@ -305,7 +252,7 @@ def _draw_combined_course_records(best_times_df: pd.DataFrame,
             base[p_idx] *= 2.0
             total = sum(base)
             col_widths = [b / total for b in base]
-        
+
         table = ax.table(
             cellText=display_df.values,
             colLabels=display_df.columns,
@@ -346,6 +293,7 @@ def _draw_combined_course_records(best_times_df: pd.DataFrame,
     fig.savefig(outpath, dpi=160, facecolor=PARKRUN_PURPLE)
     plt.close(fig)
 
+
 # ------------------------- Load course-record progression -------------------------
 
 def load_course_record_series() -> pd.DataFrame:
@@ -356,21 +304,6 @@ def load_course_record_series() -> pd.DataFrame:
         raise ValueError("course_record_progression_series.csv does not have 'event' column.")
     return pe
 
-def load_event_name(default_name: str = "Unknown") -> str:
-    """
-    Read event_name from data/event_series_summary.csv, if present.
-    """
-    if EVENT_SERIES_CSV.exists():
-        try:
-            df = pd.read_csv(EVENT_SERIES_CSV)
-            if "event_name" in df.columns:
-                s = df["event_name"].dropna().astype(str)
-                s = s[s.str.strip() != ""]
-                if not s.empty:
-                    return s.iloc[0].strip()
-        except Exception:
-            pass
-    return default_name
 
 # ------------------------- Build overall tables -------------------------
 
@@ -474,7 +407,7 @@ def build_overall_best_tables(pe: pd.DataFrame):
             ),
             "Record Age Grade (%)": (
                 f"{float(last[f'cr_{sex}_agegrade']):.2f}"
-                if pd.notna(last.get(f"cr_{sex}_agegrade")) else ""
+                if pd.notna(last.get(f'cr_{sex}_agegrade')) else ""
             ),
             "Age Grade Event": last.get(f"cr_{sex}_agegrade_set_at_event", ""),
             "Age Grade Parkrunner": last.get(f"cr_{sex}_agegrade_name", ""),
@@ -484,6 +417,7 @@ def build_overall_best_tables(pe: pd.DataFrame):
     combined_df = pd.DataFrame(combined_rows)
 
     return best_times_df, best_agegrades_df, combined_df
+
 
 # ------------------------- Age-group best times table -------------------------
 
@@ -521,13 +455,13 @@ def load_agegroup_best_times() -> pd.DataFrame:
             record_time   = last.get("cr_male_time", "")
             event_no      = last.get("cr_male_time_set_at_event", "")
             name          = last.get("cr_male_time_name", "")
-            age_grade_val = last.get("cr_male_time_agegrade", np.nan)
+            age_grade_val = last.get("cr_male_time_agegrade", pd.NA)
         else:
             # pick female
             record_time   = last.get("cr_female_time", "")
             event_no      = last.get("cr_female_time_set_at_event", "")
             name          = last.get("cr_female_time_name", "")
-            age_grade_val = last.get("cr_female_time_agegrade", np.nan)
+            age_grade_val = last.get("cr_female_time_agegrade", pd.NA)
 
         rows.append({
             "Age group": age_group,
@@ -543,6 +477,7 @@ def load_agegroup_best_times() -> pd.DataFrame:
     df = pd.DataFrame(rows)
     df = df.sort_values("Age group").reset_index(drop=True)
     return df
+
 
 # ------------------------- Main -------------------------
 
@@ -599,6 +534,7 @@ def main():
     print(f"Wrote age-group best-times CSV -> {AGEGROUP_BEST_TIMES_CSV}")
 
     # --- PNG table ---
+    # (User preference: show only Age Group, parkrunner, Time — no Set at Event, no Age Grade)
     ag_best_display = ag_best_df[["Age Group", "parkrunner", "Time"]]
 
     _draw_table(
@@ -609,6 +545,7 @@ def main():
         extra_top_margin=0,
     )
     print(f"Wrote age-group best-times table -> {AGEGROUP_BEST_TIMES_PNG}")
+
 
 if __name__ == "__main__":
     main()

@@ -11,87 +11,63 @@ Outputs to:
 """
 
 from __future__ import annotations
-import os
 import re
 from pathlib import Path
-from typing import Optional, Dict, Any, Tuple
+from typing import Optional, Dict, Any
 
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mtick
-from matplotlib.offsetbox import OffsetImage, AnnotationBbox
-from PIL import Image
 
-# ------------------------- Paths -------------------------
+from parkrun_config import (
+    # Paths
+    EVENT_DIR,
+    VIS_DIR,
+    # Style constants
+    PARKRUN_PURPLE,
+    NEAR_WHITE,
+    PARKRUN_YELLOW,
+    PARKRUN_TEAL,
+    TITLE_SIZE,
+    LABEL_SIZE,
+    TICK_SIZE,
+    GRID_LW,
+    LINE_LW,
+    BBOX_ALPHA,
+    GRID_ALPHA,
+    LOGO_ALPHA,
+    # Time helpers
+    parse_time_to_seconds,
+    fmt_sec_mmss,
+    # Plot helpers
+    add_centered_background_logo,
+    apply_standard_axes_style,
+)
 
-HERE = Path(__file__).resolve()
-PROJECT_ROOT = HERE.parents[1]            # parkrun_event_data_organizer/
-DATA_DIR = PROJECT_ROOT / "data"
-EVENT_DIR = DATA_DIR / "event_results"
-ASSETS_DIR = PROJECT_ROOT / "assets"
-VIS_DIR = PROJECT_ROOT / "visualizations"
-VIS_DIR.mkdir(parents=True, exist_ok=True)
+# ------------------------- Output paths -------------------------
 
 SERIES_CSV = VIS_DIR / "course_record_progression_series.csv"
 PLOT_TIMES = VIS_DIR / "course_record_progression_times.png"
 PLOT_AGEGRADES = VIS_DIR / "course_record_progression_agegrades.png"
 
-PARKRUN_LOGO = ASSETS_DIR / "parkrun_logo_white.png"
 
-# ------------------------- Style constants -------------------------
-
-PARKRUN_PURPLE = "#4B2E83"     # background
-NEAR_WHITE     = "#F4F4F6"     # labels/grid
-PARKRUN_YELLOW = "#FFA300"     # male line
-PARKRUN_TEAL   = "#10ECCC"     # female line
-
-TITLE_SIZE   = 26
-LABEL_SIZE   = 18
-TICK_SIZE    = 16
-AXIS_XY_LW   = 2.8
-AXIS_TR_LW   = 1.2
-GRID_LW      = 1.6
-LINE_LW      = 3.2
-LEGEND_FS    = 14
-BBOX_ALPHA   = 0.20
-GRID_ALPHA   = 0.55
-LOGO_ALPHA   = 0.12
-
-# ------------------------- Utilities -------------------------
-
-TIME_RE = re.compile(r"^\s*(?:(\d+):)?(\d{1,2}):(\d{2})\s*$")
-
-def parse_time_to_seconds(val) -> Optional[int]:
-    if val is None or (isinstance(val, float) and pd.isna(val)):
-        return None
-    s = str(val).strip()
-    if s in ("", "-", "—", "DNF", "None", "nan", "NaN"):
-        return None
-    m = TIME_RE.match(s)
-    if not m:
-        return None
-    h = int(m.group(1)) if m.group(1) else 0
-    mm = int(m.group(2))
-    ss = int(m.group(3))
-    return h * 3600 + mm * 60 + ss
-
-def fmt_sec_mmss(sec: Optional[float]) -> str:
-    if sec is None or pd.isna(sec):
-        return ""
-    sec = int(round(float(sec)))
-    h = sec // 3600
-    m = (sec % 3600) // 60
-    s = sec % 60
-    return f"{h}:{m:02d}:{s:02d}" if h > 0 else f"{m}:{s:02d}"
+# ------------------------- Gender helpers -------------------------
 
 def is_male(g: Any) -> bool:
     return str(g).strip().lower().startswith("m")
 
+
 def is_female(g: Any) -> bool:
     return str(g).strip().lower().startswith("f")
 
+
+# ------------------------- Load all events -------------------------
+
 def load_all_events() -> pd.DataFrame:
+    """
+    Load all event_XXXX.csv files from EVENT_DIR and normalize columns.
+    """
     rows = []
     for fn in sorted(EVENT_DIR.glob("event_*.csv")):
         m = re.search(r"event_(\d{4})\.csv$", fn.name)
@@ -104,11 +80,13 @@ def load_all_events() -> pd.DataFrame:
             continue
         df["event"] = evno
         rows.append(df)
+
     if not rows:
         return pd.DataFrame()
+
     df = pd.concat(rows, ignore_index=True)
 
-    # Normalize / parse
+    # Normalize / parse times
     if "time" in df.columns:
         df["time_sec"] = df["time"].apply(parse_time_to_seconds)
     else:
@@ -123,6 +101,7 @@ def load_all_events() -> pd.DataFrame:
     df["runner_num"] = pd.to_numeric(df["runner"], errors="coerce").fillna(0).astype(int)
 
     return df
+
 
 # ------------------------- Record tracking -------------------------
 
@@ -139,6 +118,7 @@ def best_row_time(dfe: pd.DataFrame, gender: str) -> Optional[pd.Series]:
     idx = cand["time_sec"].idxmin()
     return cand.loc[idx]
 
+
 def best_row_agegrade(dfe: pd.DataFrame, gender: str) -> Optional[pd.Series]:
     if dfe.empty:
         return None
@@ -153,14 +133,19 @@ def best_row_agegrade(dfe: pd.DataFrame, gender: str) -> Optional[pd.Series]:
     idx = ag.idxmax()
     return cand.loc[idx]
 
+
 def person_name(r: pd.Series) -> str:
     f = str(r.get("name_first") or "").strip()
     l = str(r.get("name_last") or "").strip()
     return (f"{f} {l}").strip()
 
+
 # ------------------------- Build progression series -------------------------
 
 def build_course_record_progression(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Build a per-event progression of course records (time and age grade, by gender).
+    """
     if df.empty:
         return pd.DataFrame(columns=[
             "event",
@@ -290,63 +275,23 @@ def build_course_record_progression(df: pd.DataFrame) -> pd.DataFrame:
     pe = pe.reindex(columns=cols)
     return pe
 
-# ------------------------- Plot helpers -------------------------
 
-def _add_centered_background_logo(fig: plt.Figure, alpha: float = LOGO_ALPHA):
-    if not PARKRUN_LOGO.exists():
-        return
-    try:
-        img = Image.open(PARKRUN_LOGO).convert("RGBA")
-    except Exception:
-        return
+# ------------------------- Annotation helper -------------------------
 
-    # compute zoom so the image height ~= figure height in display pixels
-    fig_w, fig_h = fig.get_size_inches()
-    fig_h_px = fig_h * fig.dpi
-    zoom = fig_h_px / img.height
-
-    oi = OffsetImage(img, zoom=zoom, alpha=alpha)
-    ab = AnnotationBbox(
-        oi, (0.5, 0.5),
-        xycoords=fig.transFigure,
-        frameon=False,
-        zorder=0
-    )
-    fig.add_artist(ab)
-
-def _apply_axes_style(ax: plt.Axes, y_is_time: bool):
-    # background
-    fig = ax.figure
-    fig.patch.set_facecolor(PARKRUN_PURPLE)
-    ax.set_facecolor(PARKRUN_PURPLE)
-
-    # grid
-    ax.grid(True, linestyle="--", linewidth=GRID_LW, color=NEAR_WHITE, alpha=GRID_ALPHA)
-    ax.set_axisbelow(True)
-
-    # spines: bottom/left bold; top/right subtle
-    ax.spines["bottom"].set_color(NEAR_WHITE)
-    ax.spines["left"].set_color(NEAR_WHITE)
-    ax.spines["bottom"].set_linewidth(AXIS_XY_LW)
-    ax.spines["left"].set_linewidth(AXIS_XY_LW)
-
-    for sp in ["top", "right"]:
-        ax.spines[sp].set_color(NEAR_WHITE)
-        ax.spines[sp].set_alpha(0.4)
-        ax.spines[sp].set_linewidth(AXIS_TR_LW)
-
-    # ticks
-    ax.tick_params(colors=NEAR_WHITE, which="both", width=1.6, length=6, labelsize=TICK_SIZE)
-    for lbl in ax.get_xticklabels() + ax.get_yticklabels():
-        lbl.set_fontweight("bold")
-
-    if y_is_time:
-        ax.yaxis.set_major_formatter(mtick.FuncFormatter(lambda x, _: fmt_sec_mmss(x)))
-
-def _annotate_record_points(ax, df: pd.DataFrame, value_col: str, set_event_col: str, name_col: str,
-                            value_formatter, x_offset_px: int = 10, y_offset_px: int = 10,
+def _annotate_record_points(ax,
+                            df: pd.DataFrame,
+                            value_col: str,
+                            set_event_col: str,
+                            name_col: str,
+                            value_formatter,
+                            x_offset_px: int = 10,
+                            y_offset_px: int = 10,
                             color_for_box: str = PARKRUN_YELLOW):
+    """
+    Add label boxes at events where a new record is *set*.
+    """
     import matplotlib.transforms as mtransforms
+
     for _, row in df.iterrows():
         ev = row.get("event")
         if pd.isna(ev):
@@ -356,31 +301,45 @@ def _annotate_record_points(ax, df: pd.DataFrame, value_col: str, set_event_col:
             continue
         if int(set_ev) != int(ev):
             continue
+
         val = row.get(value_col)
         if pd.isna(val) or val == "":
             continue
+
         name = (row.get(name_col) or "").strip()
         label = f"{name} — {value_formatter(val)}" if name else f"{value_formatter(val)}"
+
         trans_offset = mtransforms.ScaledTranslation(
             x_offset_px / 72.0, y_offset_px / 72.0, ax.figure.dpi_scale_trans
         )
+
         ax.annotate(
             label,
             xy=(ev, val if isinstance(val, (int, float, np.floating)) else np.nan),
-            xytext=(0, 0), textcoords="offset points",
-            ha="left", va="bottom", fontsize=14, color=NEAR_WHITE,
-            bbox=dict(boxstyle="round,pad=0.2", fc=color_for_box, ec=color_for_box, alpha=BBOX_ALPHA),
+            xytext=(0, 0),
+            textcoords="offset points",
+            ha="left",
+            va="bottom",
+            fontsize=14,
+            color=NEAR_WHITE,
+            bbox=dict(
+                boxstyle="round,pad=0.2",
+                fc=color_for_box,
+                ec=color_for_box,
+                alpha=BBOX_ALPHA,
+            ),
             transform=ax.transData + trans_offset,
         )
 
+
 # ------------------------- Plotting -------------------------
 
-def plot_times(pe: pd.DataFrame, outpath: Path):
+def plot_times(pe: pd.DataFrame, outpath: Path) -> None:
     male_sec = pe["cr_male_time"].apply(parse_time_to_seconds).astype("float")
     female_sec = pe["cr_female_time"].apply(parse_time_to_seconds).astype("float")
 
     fig, ax = plt.subplots(figsize=(12, 7), dpi=160)
-    _add_centered_background_logo(fig, alpha=LOGO_ALPHA)
+    add_centered_background_logo(fig, alpha=LOGO_ALPHA)
 
     # lines
     ax.plot(pe["event"], male_sec, label="Male time", color=PARKRUN_YELLOW, linewidth=LINE_LW)
@@ -394,11 +353,32 @@ def plot_times(pe: pd.DataFrame, outpath: Path):
         ax.set_ylim(ymin - pad, ymax + pad)
 
     # labels / title
-    ax.set_xlabel("Event number", color=NEAR_WHITE, fontweight="bold", fontsize=LABEL_SIZE, labelpad=10)
-    ax.set_ylabel("Time (mm:ss)", color=NEAR_WHITE, fontweight="bold", fontsize=LABEL_SIZE, labelpad=10)
-    ax.set_title("Course Record Progression — Times", color=NEAR_WHITE, fontweight="bold", fontsize=TITLE_SIZE, pad=22)
+    ax.set_xlabel(
+        "Event number",
+        color=NEAR_WHITE,
+        fontweight="bold",
+        fontsize=LABEL_SIZE,
+        labelpad=10,
+    )
+    ax.set_ylabel(
+        "Time (mm:ss)",
+        color=NEAR_WHITE,
+        fontweight="bold",
+        fontsize=LABEL_SIZE,
+        labelpad=10,
+    )
+    ax.set_title(
+        "Course Record Progression — Times",
+        color=NEAR_WHITE,
+        fontweight="bold",
+        fontsize=TITLE_SIZE,
+        pad=22,
+    )
 
-    _apply_axes_style(ax, y_is_time=True)
+    # Apply shared axes style (background, grid, spines, ticks)
+    apply_standard_axes_style(ax)
+    # Time formatting on y-axis
+    ax.yaxis.set_major_formatter(mtick.FuncFormatter(lambda x, _: fmt_sec_mmss(x)))
 
     # annotate when a new record is set
     pe_plot = pe.copy()
@@ -406,26 +386,30 @@ def plot_times(pe: pd.DataFrame, outpath: Path):
     pe_plot["cr_female_time_sec"] = female_sec
 
     _annotate_record_points(
-        ax, pe_plot,
+        ax,
+        pe_plot,
         value_col="cr_male_time_sec",
         set_event_col="cr_male_time_set_at_event",
         name_col="cr_male_time_name",
         value_formatter=fmt_sec_mmss,
-        x_offset_px=10, y_offset_px=10,
-        color_for_box=PARKRUN_YELLOW
+        x_offset_px=10,
+        y_offset_px=10,
+        color_for_box=PARKRUN_YELLOW,
     )
     _annotate_record_points(
-        ax, pe_plot,
+        ax,
+        pe_plot,
         value_col="cr_female_time_sec",
         set_event_col="cr_female_time_set_at_event",
         name_col="cr_female_time_name",
         value_formatter=fmt_sec_mmss,
-        x_offset_px=10, y_offset_px=10,
-        color_for_box=PARKRUN_TEAL
+        x_offset_px=10,
+        y_offset_px=10,
+        color_for_box=PARKRUN_TEAL,
     )
 
     # legend
-    leg = ax.legend(facecolor=PARKRUN_PURPLE, edgecolor=NEAR_WHITE, fontsize=LEGEND_FS)
+    leg = ax.legend(facecolor=PARKRUN_PURPLE, edgecolor=NEAR_WHITE, fontsize=14)
     for txt in leg.get_texts():
         txt.set_color(NEAR_WHITE)
         txt.set_fontweight("bold")
@@ -435,12 +419,13 @@ def plot_times(pe: pd.DataFrame, outpath: Path):
     fig.savefig(outpath, dpi=160, facecolor=PARKRUN_PURPLE)
     plt.close(fig)
 
-def plot_agegrades(pe: pd.DataFrame, outpath: Path):
+
+def plot_agegrades(pe: pd.DataFrame, outpath: Path) -> None:
     male_ag = pd.to_numeric(pe["cr_male_agegrade"], errors="coerce")
     female_ag = pd.to_numeric(pe["cr_female_agegrade"], errors="coerce")
 
     fig, ax = plt.subplots(figsize=(12, 7), dpi=160)
-    _add_centered_background_logo(fig, alpha=LOGO_ALPHA)
+    add_centered_background_logo(fig, alpha=LOGO_ALPHA)
 
     ax.plot(pe["event"], male_ag, label="Male age grade", color=PARKRUN_YELLOW, linewidth=LINE_LW)
     ax.plot(pe["event"], female_ag, label="Female age grade", color=PARKRUN_TEAL, linewidth=LINE_LW)
@@ -452,32 +437,54 @@ def plot_agegrades(pe: pd.DataFrame, outpath: Path):
         pad = max(0.3, 0.05 * (ymax - ymin))
         ax.set_ylim(ymin - pad, ymax + pad)
 
-    ax.set_xlabel("Event number", color=NEAR_WHITE, fontweight="bold", fontsize=LABEL_SIZE, labelpad=10)
-    ax.set_ylabel("Age grade (%)", color=NEAR_WHITE, fontweight="bold", fontsize=LABEL_SIZE, labelpad=10)
-    ax.set_title("Course Record Progression — Age Grades", color=NEAR_WHITE, fontweight="bold", fontsize=TITLE_SIZE, pad=22)
+    ax.set_xlabel(
+        "Event number",
+        color=NEAR_WHITE,
+        fontweight="bold",
+        fontsize=LABEL_SIZE,
+        labelpad=10,
+    )
+    ax.set_ylabel(
+        "Age grade (%)",
+        color=NEAR_WHITE,
+        fontweight="bold",
+        fontsize=LABEL_SIZE,
+        labelpad=10,
+    )
+    ax.set_title(
+        "Course Record Progression — Age Grades",
+        color=NEAR_WHITE,
+        fontweight="bold",
+        fontsize=TITLE_SIZE,
+        pad=22,
+    )
 
-    _apply_axes_style(ax, y_is_time=False)
+    apply_standard_axes_style(ax)
 
     _annotate_record_points(
-        ax, pe,
+        ax,
+        pe,
         value_col="cr_male_agegrade",
         set_event_col="cr_male_agegrade_set_at_event",
         name_col="cr_male_agegrade_name",
         value_formatter=lambda v: f"{float(v):.2f}%",
-        x_offset_px=10, y_offset_px=10,
-        color_for_box=PARKRUN_YELLOW
+        x_offset_px=10,
+        y_offset_px=-10,
+        color_for_box=PARKRUN_YELLOW,
     )
     _annotate_record_points(
-        ax, pe,
+        ax,
+        pe,
         value_col="cr_female_agegrade",
         set_event_col="cr_female_agegrade_set_at_event",
         name_col="cr_female_agegrade_name",
         value_formatter=lambda v: f"{float(v):.2f}%",
-        x_offset_px=10, y_offset_px=10,
-        color_for_box=PARKRUN_TEAL
+        x_offset_px=10,
+        y_offset_px=-10,
+        color_for_box=PARKRUN_TEAL,
     )
 
-    leg = ax.legend(facecolor=PARKRUN_PURPLE, edgecolor=NEAR_WHITE, fontsize=LEGEND_FS)
+    leg = ax.legend(facecolor=PARKRUN_PURPLE, edgecolor=NEAR_WHITE, fontsize=14)
     for txt in leg.get_texts():
         txt.set_color(NEAR_WHITE)
         txt.set_fontweight("bold")
@@ -486,6 +493,7 @@ def plot_agegrades(pe: pd.DataFrame, outpath: Path):
     fig.tight_layout(rect=[0.02, 0.02, 0.98, 0.95])
     fig.savefig(outpath, dpi=160, facecolor=PARKRUN_PURPLE)
     plt.close(fig)
+
 
 # ------------------------- Main -------------------------
 
@@ -504,6 +512,7 @@ def main():
 
     plot_agegrades(pe, PLOT_AGEGRADES)
     print(f"Wrote age-grades plot -> {PLOT_AGEGRADES}")
+
 
 if __name__ == "__main__":
     main()
