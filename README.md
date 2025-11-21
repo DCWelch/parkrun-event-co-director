@@ -61,5 +61,6 @@ If you would like to run things yourself, I tried to make it as simple as I coul
 ## Other Helpful Resources
 
 The following links send you to other helpful tools for parkrun Event Directors, Volunteer Coordinators and/or Social Media Managers:
+ - https://github.com/AlanLyttonJones/Age-Grade-Tables
  - https://chromewebstore.google.com/detail/parkrun-event-summary/nfdbgfodockojbhmenjohphggbokgmaf
  - https://github.com/leoz0214/Parkrun-Data-Scraper
