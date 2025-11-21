@@ -28,7 +28,7 @@ import math
 import subprocess
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
-
+from pathlib import Path
 import requests
 from bs4 import BeautifulSoup
 import pandas as pd
@@ -52,10 +52,17 @@ from parkrun_config import (
     parse_time_to_seconds,
     PARKRUNS_MASTER_CSV,
     VOLUNTEERS_MASTER_CSV,
+    ASSETS_DIR,
 )
 
 # logger (not really config; cheap to keep local)
 log = logging.getLogger("parkrun")
+
+# Global WMA / Alan Jones standards (2010 + 2025)
+STANDARDS_2010: Dict[Tuple[str, int], float] = {}
+STANDARDS_2025: Dict[Tuple[str, int], float] = {}
+BEST_STD_2010_MALE: Optional[float] = None
+BEST_STD_2010_FEMALE: Optional[float] = None
 
 # Local alias for convenience (comes from config)
 EVENT_NAME = EVENT_NAME_DEFAULT
@@ -143,6 +150,391 @@ def parse_age_grade(cell_text: str) -> Optional[float]:
     except ValueError:
         return None
 
+def parse_age_group(ag: Optional[str]) -> Tuple[Optional[str], Optional[int], Optional[int]]:
+    """
+    Parse a parkrun age_group string into:
+        sex ('M' or 'W'), min_age, max_age (inclusive)
+
+    Based on the parkrun group definitions:
+        JM10 / JW10: Under 10  (approx: 0–10)
+        JM11-14 / JW11-14: 11–14
+        JM15-17 / JW15-17: 15–17
+        SM18-19 / SW18-19: 18–19
+        SM20-24 / SW20-24: 20–24
+        SM25-29 / SW25-29: 25–29
+        SM30-34 / SW30-34: 30–34
+        VM35-39 / VW35-39: 35–39
+        ...
+        VM75+ / VW75+: 75+
+
+    For 75+, we cap at 100.
+    """
+    if not ag or not isinstance(ag, str):
+        return None, None, None
+
+    ag = ag.strip().upper()
+    m = re.match(r"^([A-Z]+)([\d\+\-]+)$", ag)
+    if not m:
+        return None, None, None
+
+    prefix, agepart = m.group(1), m.group(2)
+
+    # Determine sex from prefix
+    sex = None
+    if "M" in prefix and "W" not in prefix:
+        sex = "M"
+    elif "W" in prefix and "M" not in prefix:
+        sex = "W"
+    else:
+        return None, None, None
+
+    min_age, max_age = None, None
+    if "-" in agepart:
+        a, b = agepart.split("-", 1)
+        try:
+            min_age = int(a)
+            max_age = int(b)
+        except ValueError:
+            pass
+    elif agepart.endswith("+"):
+        try:
+            min_age = int(agepart[:-1])
+            max_age = 100
+        except ValueError:
+            pass
+    elif agepart == "10":
+        # JM10/JW10: "Under 10" → approximate as 0–10
+        min_age, max_age = 0, 10
+    else:
+        try:
+            a = int(agepart)
+            min_age, max_age = a, a
+        except ValueError:
+            pass
+
+    return sex, min_age, max_age
+
+def _norm(x: object) -> str:
+    return str(x).strip().lower().replace(" ", "")
+
+
+def load_alan_table_file(path: Path, sex_code: str) -> Dict[Tuple[str, int], float]:
+    """
+    Load a single Alan Lytton Jones road standards Excel file and
+    extract Age + 5 km standard times into {(sex_code, age): time_sec}.
+
+    Uses sheets in priority:
+      - AgeStdSec   (standard times in seconds)
+      - AgeStdHMS   (standard times H:MM:SS)
+      - AgeStdFactors (age factors + OC sec)
+    """
+    if not path.is_file():
+        log.warning(f"Standards file not found: {path}")
+        return {}
+
+    try:
+        xls = pd.ExcelFile(path)
+    except Exception as e:
+        log.error(f"Failed to open {path}: {e}")
+        return {}
+
+    preferred = ["AgeStdSec", "AgeStdHMS", "AgeStdFactors"]
+    sheet_name = None
+    for name in preferred:
+        if name in xls.sheet_names:
+            sheet_name = name
+            break
+    if sheet_name is None:
+        sheet_name = xls.sheet_names[0]
+
+    log.info(f"Reading {path.name} sheet '{sheet_name}'")
+    try:
+        df_raw = xls.parse(sheet_name, header=None)
+    except Exception as e:
+        log.error(f"Failed to read sheet {sheet_name} from {path}: {e}")
+        return {}
+
+    # find header row with Age + 5km
+    header_row_idx = None
+    age_col_idx = None
+    time_col_idx = None
+
+    for i, row in df_raw.iterrows():
+        for j, val in row.items():
+            if _norm(val) == "age":
+                age_col_idx = j
+            v = _norm(val)
+            if v in {"5km", "5k", "5000m", "5000metres", "5000meters"}:
+                time_col_idx = j
+        if age_col_idx is not None and time_col_idx is not None:
+            header_row_idx = i
+            break
+
+    if header_row_idx is None or age_col_idx is None or time_col_idx is None:
+        log.error(
+            f"Could not find Age and 5 km header row in {path} "
+            f"(sheet={sheet_name}, shape={df_raw.shape})"
+        )
+        return {}
+
+    log.debug(
+        f"In {path.name} [{sheet_name}]: header_row_idx={header_row_idx}, "
+        f"age_col_idx={age_col_idx}, time_col_idx={time_col_idx}"
+    )
+
+    df_data = df_raw.iloc[header_row_idx + 1 :].copy()
+    recs: Dict[Tuple[str, int], float] = {}
+
+    # Case 1: times directly (AgeStdSec / AgeStdHMS)
+    if sheet_name in ("AgeStdSec", "AgeStdHMS"):
+        df = df_data[[age_col_idx, time_col_idx]].copy()
+        df.columns = ["age_raw", "time_raw"]
+
+        df["age"] = pd.to_numeric(df["age_raw"], errors="coerce")
+        df = df[df["age"].notna()]
+        df["age"] = df["age"].astype(int)
+
+        def to_seconds(x):
+            if x is None:
+                return None
+            if isinstance(x, (int, float)):
+                return float(x)
+            return parse_time_to_seconds(str(x))
+
+        df["time_sec"] = df["time_raw"].apply(to_seconds)
+        df = df[df["time_sec"].notna()]
+
+        for _, r in df.iterrows():
+            age = int(r["age"])
+            tsec = float(r["time_sec"])
+            recs[(sex_code, age)] = tsec
+
+        log.info(
+            f"Loaded {len(recs)} (sex={sex_code}) 5k standards from "
+            f"{path.name} [{sheet_name}]"
+        )
+        return recs
+
+    # Case 2: factors + OC sec (AgeStdFactors)
+    oc_sec: Optional[float] = None
+    for _, row in df_data.iterrows():
+        label = row[age_col_idx]
+        v = _norm(label)
+        if v in {"ocsec", "oc"}:
+            oc_val = row[time_col_idx]
+            if isinstance(oc_val, (int, float)):
+                oc_sec = float(oc_val)
+            else:
+                oc_sec = parse_time_to_seconds(str(oc_val))
+            log.debug(f"In {path.name} [{sheet_name}]: OC_sec for 5k = {oc_sec}")
+            break
+
+    if oc_sec is None:
+        log.error(
+            f"Did not find 'OC sec' / 'OC' row in {path} [{sheet_name}] "
+            "for 5k column; cannot derive standards."
+        )
+        return recs
+
+    for _, row in df_data.iterrows():
+        label = row[age_col_idx]
+        v = _norm(label)
+
+        if v in {"ocsec", "oc", "distance"}:
+            continue
+
+        try:
+            age = int(label)
+        except Exception:
+            continue
+
+        val = row[time_col_idx]
+        if val is None or (isinstance(val, float) and math.isnan(val)):
+            continue
+
+        if isinstance(val, (int, float)):
+            factor = float(val)
+            if factor <= 0:
+                continue
+            tsec = oc_sec / factor
+        else:
+            tsec = parse_time_to_seconds(str(val))
+
+        if tsec is None:
+            continue
+
+        recs[(sex_code, age)] = float(tsec)
+
+    log.info(
+        f"Loaded {len(recs)} (sex={sex_code}) 5k standards from "
+        f"{path.name} [{sheet_name}]"
+    )
+    return recs
+
+def load_alan_standards_for_year(year: int) -> Dict[Tuple[str, int], float]:
+    """
+    Load per-age standard times for the given year from the assets/age_grade_stadards dir.
+    Returns {(sex, age): standard_time_sec}.
+    """
+    base = Path(ASSETS_DIR) / "age_grade_stadards" / str(year)
+    paths = {
+        "W": base / f"FemaleRoadStd{year}.xls",
+        "M": base / f"MaleRoadStd{year}.xls",
+    }
+    # some years are .xlsx instead of .xls
+    for sex, p in list(paths.items()):
+        if not p.is_file():
+            alt = p.with_suffix(".xlsx")
+            if alt.is_file():
+                paths[sex] = alt
+
+    recs: Dict[Tuple[str, int], float] = {}
+    for sex, p in paths.items():
+        recs.update(load_alan_table_file(p, sex_code=sex))
+    log.info(f"[standards {year}] total entries loaded: {len(recs)}")
+    return recs
+
+def _sex_from_gender_and_agegroup(gender: Optional[str], age_group: Optional[str]) -> Optional[str]:
+    # First try the age_group prefix (JM/SM/VM vs JW/SW/VW)
+    sx_ag, _, _ = parse_age_group(age_group)
+    if sx_ag in {"M", "W"}:
+        return sx_ag
+    # Fallback to gender string
+    if gender:
+        g = gender.strip().upper()
+        if g.startswith("M"):
+            return "M"
+        if g.startswith("F") or g.startswith("W"):
+            return "W"
+    return None
+
+
+def annotate_age_grade_extras(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Add columns:
+      - alan_jones_age_grade_2010
+      - alan_jones_age_grade_2025
+      - age_grade_mapped_time_male
+      - age_grade_mapped_time_female
+
+    For each row that has time + age_grade + age_group, we:
+      - infer a best-fit age within the age_group using 2010 standards
+        (matching parkrun's age_grade as closely as possible)
+      - compute 2010 + 2025 age grades at that age
+      - compute mapped times for 'peak' male and female ages using 2010 standards
+    """
+    if not STANDARDS_2010:
+        # Nothing to do if we don't have standards
+        df.setdefault("alan_jones_age_grade_2010", pd.NA)
+        df.setdefault("alan_jones_age_grade_2025", pd.NA)
+        df.setdefault("age_grade_mapped_time_male", pd.NA)
+        df.setdefault("age_grade_mapped_time_female", pd.NA)
+        return df
+
+    for col in [
+        "alan_jones_age_grade_2010",
+        "alan_jones_age_grade_2025",
+        "age_grade_mapped_time_male",
+        "age_grade_mapped_time_female",
+    ]:
+        if col not in df.columns:
+            df[col] = pd.NA
+
+    for idx, row in df.iterrows():
+        ag = row.get("age_grade")
+        time_str = row.get("time")
+        age_group = row.get("age_group")
+        gender = row.get("gender")
+
+        if pd.isna(ag) or not time_str or pd.isna(age_group):
+            continue
+
+        sex_code = _sex_from_gender_and_agegroup(gender, age_group)
+        if sex_code not in {"M", "W"}:
+            continue
+
+        time_sec = parse_time_to_seconds(str(time_str))
+        if time_sec is None or time_sec <= 0:
+            continue
+
+        # Infer best age in the group's range by matching parkrun age_grade with 2010 standards
+        sx_ag, age_min, age_max = parse_age_group(age_group)
+        sx = sx_ag if sx_ag in {"M", "W"} else sex_code
+        if age_min is None or age_max is None:
+            continue
+
+        best_age = None
+        best_pred_2010 = None
+        best_err = None
+
+        for age in range(int(age_min), int(age_max) + 1):
+            std_2010 = STANDARDS_2010.get((sx, age))
+            if std_2010 is None:
+                continue
+            pred = 100.0 * (std_2010 / time_sec)
+            err = abs(pred - ag)
+            if best_err is None or err < best_err:
+                best_err = err
+                best_age = age
+                best_pred_2010 = pred
+
+        if best_age is None:
+            continue
+
+        # 2010 age grade (will be ~ equal to parkrun's age_grade)
+        df.at[idx, "alan_jones_age_grade_2010"] = best_pred_2010
+
+        # 2025 age grade at same inferred age, if available
+        std_2025 = STANDARDS_2025.get((sx, best_age))
+        if std_2025 is not None:
+            pred_2025 = 100.0 * (std_2025 / time_sec)
+            df.at[idx, "alan_jones_age_grade_2025"] = pred_2025
+
+        # Mapped times for peak male/female age (2010)
+        if ag and ag > 0:
+            if BEST_STD_2010_MALE is not None:
+                t_male = BEST_STD_2010_MALE * 100.0 / ag
+                df.at[idx, "age_grade_mapped_time_male"] = seconds_to_time_str(int(round(t_male)))
+            if BEST_STD_2010_FEMALE is not None:
+                t_fem = BEST_STD_2010_FEMALE * 100.0 / ag
+                df.at[idx, "age_grade_mapped_time_female"] = seconds_to_time_str(int(round(t_fem)))
+
+    return df
+
+def normalize_columns(df: pd.DataFrame, event_no: int) -> pd.DataFrame:
+    """
+    Ensure a standard set of columns for event result CSVs.
+    """
+    expected_cols = [
+        "position",
+        "name_first",
+        "name_last",
+        "id",
+        "gender",
+        "age_group",
+        "age_grade",
+        "club",
+        "first_time_participant",
+        "first_time_volunteer",
+        "pb",
+        "runner",
+        "participant",
+        "volunteer",
+        "time",
+        "event",
+        "alan_jones_age_grade_2010",
+        "alan_jones_age_grade_2025",
+        "age_grade_mapped_time_male",
+        "age_grade_mapped_time_female",
+    ]
+    for col in expected_cols:
+        if col not in df.columns:
+            df[col] = pd.NA
+
+    df["event"] = event_no
+    if "id" in df.columns:
+        df["id"] = df["id"].astype("string")
+    return df
 
 def split_name(full_name: str) -> Tuple[str, str]:
     """
@@ -432,39 +824,6 @@ def load_existing_event_csvs() -> Dict[int, pd.DataFrame]:
             log.warning(f"Failed to read {fn}: {e}")
     return out
 
-
-def normalize_columns(df: pd.DataFrame, event_no: int) -> pd.DataFrame:
-    """
-    Ensure a standard set of columns for event result CSVs.
-    """
-    expected_cols = [
-        "position",
-        "name_first",
-        "name_last",
-        "id",
-        "gender",
-        "age_group",
-        "age_grade",
-        "club",
-        "first_time_participant",
-        "first_time_volunteer",
-        "pb",
-        "runner",
-        "participant",
-        "volunteer",
-        "time",
-        "event",
-    ]
-    for col in expected_cols:
-        if col not in df.columns:
-            df[col] = pd.NA
-
-    df["event"] = event_no
-    if "id" in df.columns:
-        df["id"] = df["id"].astype("string")
-    return df
-
-
 def save_event_df(event_no: int, df: pd.DataFrame) -> str:
     fp = os.path.join(EVENT_DIR, f"event_{event_no:04d}.csv")
     df.to_csv(fp, index=False)
@@ -568,6 +927,10 @@ def update_master_participants(all_event_dfs: Dict[int, pd.DataFrame]) -> pd.Dat
             "gender",
             "age_group",
             "age_grade",
+            "alan_jones_age_grade_2010",
+            "alan_jones_age_grade_2025",
+            "age_grade_mapped_time_male",
+            "age_grade_mapped_time_female",
             "club",
             "first_time_participant",
             "pb",
@@ -635,11 +998,19 @@ def update_master_participants(all_event_dfs: Dict[int, pd.DataFrame]) -> pd.Dat
             pb_time_str = seconds_to_time_str(pb_time_sec)
             pb_position = pb_row.get("position")
             pb_age_grade = pb_row.get("age_grade")
+            pb_aj2010 = pb_row.get("alan_jones_age_grade_2010")
+            pb_aj2025 = pb_row.get("alan_jones_age_grade_2025")
+            pb_map_male = pb_row.get("age_grade_mapped_time_male")
+            pb_map_fem = pb_row.get("age_grade_mapped_time_female")
         else:
             pb_time_str = ""
             pb_time_sec = None
             pb_position = None
             pb_age_grade = None
+            pb_aj2010 = None
+            pb_aj2025 = None
+            pb_map_male = None
+            pb_map_fem = None
 
         latest_row = g_sorted.iloc[-1]
         gender = latest_row.get("gender")
@@ -656,12 +1027,17 @@ def update_master_participants(all_event_dfs: Dict[int, pd.DataFrame]) -> pd.Dat
             "age_group": age_group,
             "pb_position": pb_position,
             "pb_age_grade": pb_age_grade,
+            "pb_alan_jones_age_grade_2010": pb_aj2010,
+            "pb_alan_jones_age_grade_2025": pb_aj2025,
+            "pb_age_grade_mapped_time_male": pb_map_male,
+            "pb_age_grade_mapped_time_female": pb_map_fem,
             "pb_time": pb_time_str,
             "num_runs": num_runs,
             "num_volunteers": num_vols,
             "num_participations": num_parts,
             "volunteer_percentage": volunteer_percentage,
         })
+
 
     master_df = pd.DataFrame(master)
     master_df.to_csv(MASTER_PARTICIPANTS_CSV, index=False)
@@ -926,6 +1302,23 @@ def main():
 
     ensure_dirs()
 
+    # Load WMA / Alan Jones standards (2010 + 2025) once
+    global STANDARDS_2010, STANDARDS_2025, BEST_STD_2010_MALE, BEST_STD_2010_FEMALE
+    STANDARDS_2010 = load_alan_standards_for_year(2010)
+    STANDARDS_2025 = load_alan_standards_for_year(2025)
+
+    if STANDARDS_2010:
+        male_times = [t for (sx, _), t in STANDARDS_2010.items() if sx == "M"]
+        fem_times = [t for (sx, _), t in STANDARDS_2010.items() if sx == "W"]
+        BEST_STD_2010_MALE = min(male_times) if male_times else None
+        BEST_STD_2010_FEMALE = min(fem_times) if fem_times else None
+        log.info(
+            f"Peak 2010 standards: male={BEST_STD_2010_MALE}s, "
+            f"female={BEST_STD_2010_FEMALE}s"
+        )
+    else:
+        log.warning("No 2010 standards loaded; derived age-grade fields will be empty.")
+
     session = get_http_session(args.cookie)
 
     existing = load_existing_event_csvs()
@@ -1064,10 +1457,21 @@ def main():
 
         df_event = pd.DataFrame(rows_for_df)
         df_event = normalize_columns(df_event, evno)
+
+        # Annotate with Alan Jones / WMA-derived fields
+        df_event = annotate_age_grade_extras(df_event)
+
         save_event_df(evno, df_event)
         all_event_dfs[evno] = df_event
         log.info(f"[event {evno}] scraped & saved (rows={len(df_event)})")
-
+    
+    # Ensure all loaded events have the derived age-grade fields
+    for evno, df in list(all_event_dfs.items()):
+        df2 = annotate_age_grade_extras(df.copy())
+        df2 = normalize_columns(df2, evno)
+        save_event_df(evno, df2)
+        all_event_dfs[evno] = df2
+    
     if not all_event_dfs:
         log.error("No event data collected; exiting.")
         return 1
