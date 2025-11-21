@@ -180,7 +180,10 @@ def build_agegroup_course_record_progression(df: pd.DataFrame, age_group: str) -
     if dfg.empty:
         return pd.DataFrame()
 
-    events = sorted(dfg["event"].unique())
+    # Use *all* events for the x-axis, not just events where this age group appears
+    ### CHANGED: use global event range so x-axis is 1..N with no gaps
+    all_events = sorted(df["event"].unique())
+
     out_rows: List[Dict[str, Any]] = []
 
     rec_m_time: Optional[int] = None
@@ -188,7 +191,7 @@ def build_agegroup_course_record_progression(df: pd.DataFrame, age_group: str) -
     rec_f_time: Optional[int] = None
     rec_f_meta: Dict[str, Any] = {}
 
-    for ev in events:
+    for ev in all_events:
         dfe = dfg[dfg["event"] == ev].copy()
 
         m_row = best_row_time_agegroup(dfe, "male")
@@ -347,15 +350,28 @@ def plot_agegroup_times(pe: pd.DataFrame, age_group: str, outpath: Path):
     fig, ax = plt.subplots(figsize=(12, 7), dpi=160)
     _add_centered_background_logo(fig, alpha=LOGO_ALPHA)
 
-    # lines
-    ax.plot(pe["event"], male_sec, label="Male", color=PARKRUN_YELLOW, linewidth=LINE_LW)
-    ax.plot(pe["event"], female_sec, label="Female", color=PARKRUN_TEAL, linewidth=LINE_LW)
+    # Only plot lines if there is at least one finite point
+    ### NEW: avoid weird lines from all-NaN series
+    male_has = np.isfinite(male_sec.values).any()
+    female_has = np.isfinite(female_sec.values).any()
+
+    if male_has:
+        ax.plot(pe["event"], male_sec, color=PARKRUN_YELLOW, linewidth=LINE_LW)
+    if female_has:
+        ax.plot(pe["event"], female_sec, color=PARKRUN_TEAL, linewidth=LINE_LW)
 
     # y-lims from combined values
     ymin = float(np.nanmin(vals))
     ymax = float(np.nanmax(vals))
     pad = max(5.0, 0.05 * (ymax - ymin))
     ax.set_ylim(ymin - pad, ymax + pad)
+
+    # x-axis should contain all events as whole numbers
+    ### NEW: ensure integer event axis and full range
+    ev_min = int(pe["event"].min())
+    ev_max = int(pe["event"].max())
+    ax.set_xlim(ev_min, ev_max)
+    ax.xaxis.set_major_locator(mtick.MaxNLocator(integer=True))
 
     # labels / title
     ax.set_xlabel("Event number", color=NEAR_WHITE, fontweight="bold", fontsize=LABEL_SIZE, labelpad=10)
@@ -391,12 +407,13 @@ def plot_agegroup_times(pe: pd.DataFrame, age_group: str, outpath: Path):
         color_for_box=PARKRUN_TEAL
     )
 
-    # legend
-    leg = ax.legend(facecolor=PARKRUN_PURPLE, edgecolor=NEAR_WHITE, fontsize=LEGEND_FS)
-    for txt in leg.get_texts():
-        txt.set_color(NEAR_WHITE)
-        txt.set_fontweight("bold")
-    leg.get_frame().set_alpha(0.0)
+    # Legend removed: age groups are already gendered and colour-coded
+    ### CHANGED: no legend; keep colours only
+    # leg = ax.legend(facecolor=PARKRUN_PURPLE, edgecolor=NEAR_WHITE, fontsize=LEGEND_FS)
+    # for txt in leg.get_texts():
+    #     txt.set_color(NEAR_WHITE)
+    #     txt.set_fontweight("bold")
+    # leg.get_frame().set_alpha(0.0)
 
     fig.tight_layout(rect=[0.02, 0.02, 0.98, 0.95])
     fig.savefig(outpath, dpi=160, facecolor=PARKRUN_PURPLE)
