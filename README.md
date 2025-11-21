@@ -14,6 +14,10 @@ If you're a parkrun Event Director who wants the outputs from this tool, but doe
 
 If you would like to run the tool locally:
 
+### Requirements
+
+This project requires Python 3.8+
+
 ### Setup
 
 `git clone https://github.com/DCWelch/parkrun-event-co-director.git`
