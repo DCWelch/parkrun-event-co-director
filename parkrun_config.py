@@ -25,7 +25,8 @@ from PIL import Image
 # Default root event URL used by the organizer script
 ROOT_URL_DEFAULT: str = "https://www.parkrun.us/farmpond/"
 
-# Human-friendly event name (used in leaderboards / tables)
+# Human-friendly event name (used to title visualizations)
+#     Note: Exclude "parkrun"... that is added automatically
 EVENT_NAME_DEFAULT: str = "Farm Pond"
 
 # Defaults for event range used by the organizer script

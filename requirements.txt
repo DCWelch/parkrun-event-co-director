@@ -2,3 +2,6 @@ requests
 beautifulsoup4
 pandas
 python-dateutil
+matplotlib
+numpy
+Pillow
