@@ -69,3 +69,5 @@ The following links send you to other helpful tools for parkrun Event Directors,
  - https://chromewebstore.google.com/detail/parkrun-event-summary/nfdbgfodockojbhmenjohphggbokgmaf
  - https://github.com/leoz0214/Parkrun-Data-Scraper
  - https://github.com/FingerLakesRunnersClub/AgeGradeCalculator
+ - http://howardgrubb.co.uk/athletics/mldrroad25.html (2025 Age Grading)
+ - http://www.howardgrubb.co.uk/athletics/wmaroad15.html (use the 2010 Factors for parkrun Age Grading)
