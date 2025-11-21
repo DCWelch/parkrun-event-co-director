@@ -212,10 +212,11 @@ def main():
     series.to_csv(SERIES_CSV, index=False)
     print(f"Wrote event counts CSV -> {SERIES_CSV}")
 
-    plot_single_series(series, "runners", "Runners per Event", PARKRUN_YELLOW, PLOT_RUNNERS)
+    # Use NEAR_WHITE for all three series so they’re not gender-coded
+    plot_single_series(series, "runners", "Runners per Event", NEAR_WHITE, PLOT_RUNNERS)
     print(f"Wrote runners plot -> {PLOT_RUNNERS}")
 
-    plot_single_series(series, "participants", "Participants per Event", TEAL, PLOT_PARTICIPANTS)
+    plot_single_series(series, "participants", "Participants per Event", NEAR_WHITE, PLOT_PARTICIPANTS)
     print(f"Wrote participants plot -> {PLOT_PARTICIPANTS}")
 
     plot_single_series(series, "volunteers", "Volunteers per Event", NEAR_WHITE, PLOT_VOLUNTEERS)
