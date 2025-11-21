@@ -16,11 +16,11 @@ If you would like to run the tool locally:
 
 ### Setup
 
-`git clone https://github.com/DCWelch/parkrun-event-co-director.git
+`git clone https://github.com/DCWelch/parkrun-event-co-director.git`
 
-cd parkrun-event-co-director
+`cd parkrun-event-co-director`
 
-pip install -r requirements.txt`
+`pip install -r requirements.txt`
 
 ### Config
 
