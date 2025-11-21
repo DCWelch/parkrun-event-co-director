@@ -65,9 +65,9 @@ Modify the "EVENT DEFAULTS" in parkrun_config.py to match the parkrun you want t
 ## Other Helpful Resources
 
 The following links send you to other helpful tools for parkrun Event Directors, Volunteer Coordinators and/or Social Media Managers:
- - https://github.com/AlanLyttonJones/Age-Grade-Tables
- - https://chromewebstore.google.com/detail/parkrun-event-summary/nfdbgfodockojbhmenjohphggbokgmaf
- - https://github.com/leoz0214/Parkrun-Data-Scraper
- - https://github.com/FingerLakesRunnersClub/AgeGradeCalculator
- - http://howardgrubb.co.uk/athletics/mldrroad25.html (2025 Age Grading)
- - http://www.howardgrubb.co.uk/athletics/wmaroad15.html (use the 2010 Factors for parkrun Age Grading)
+ - https://github.com/AlanLyttonJones/Age-Grade-Tables (Age Grading)
+ - https://chromewebstore.google.com/detail/parkrun-event-summary/nfdbgfodockojbhmenjohphggbokgmaf (parkrun event summaries Google Chrome Extension)
+ - https://github.com/leoz0214/Parkrun-Data-Scraper (Another parkrun data tool similar to this one)
+ - https://github.com/FingerLakesRunnersClub/AgeGradeCalculator (.NET Age Grading Tool)
+ - http://howardgrubb.co.uk/athletics/mldrroad25.html (2025 Age Grading Tool)
+ - http://www.howardgrubb.co.uk/athletics/wmaroad15.html (2010 Age Grading Tool... Use the 2010 Factors for parkrun Age Grading)
