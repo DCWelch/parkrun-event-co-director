@@ -96,6 +96,32 @@ class EventData:
 
 # ------------------------- Helpers -------------------------------------
 
+# Match times like M:SS, MM:SS, H:MM:SS, HH:MM:SS
+TIME_RE = re.compile(r"\b\d+:\d{2}(?::\d{2})?\b")
+
+def extract_single_time(text: str) -> Optional[str]:
+    """
+    From a cell string that might contain multiple time-like tokens
+    (e.g. '31:27 28:21 New PB'), return the first time-like token.
+
+    If none are found, return None.
+    """
+    if not text:
+        return None
+    m = TIME_RE.search(text)
+    if not m:
+        return None
+    return m.group(0)
+
+# Clean up any cells that have multiple time-like tokens
+def clean_time_string(val):
+    if pd.isna(val):
+        return val
+    s = str(val)
+    # Remove PB/First Timer tags just in case they slipped through
+    s = re.sub(r"(New\s*PB!?|First\s*Timer!?|PB\s*)", "", s, flags=re.I).strip()
+    t = extract_single_time(s)
+    return t if t is not None else ""
 
 def soup_text(node) -> str:
     """
@@ -408,7 +434,6 @@ def _sex_from_gender_and_agegroup(gender: Optional[str], age_group: Optional[str
             return "W"
     return None
 
-
 def annotate_age_grade_extras(df: pd.DataFrame) -> pd.DataFrame:
     """
     Add columns:
@@ -425,10 +450,15 @@ def annotate_age_grade_extras(df: pd.DataFrame) -> pd.DataFrame:
     """
     if not STANDARDS_2010:
         # Nothing to do if we don't have standards
-        df.setdefault("alan_jones_age_grade_2010", pd.NA)
-        df.setdefault("alan_jones_age_grade_2025", pd.NA)
-        df.setdefault("age_grade_mapped_time_male", pd.NA)
-        df.setdefault("age_grade_mapped_time_female", pd.NA)
+        for col in [
+            "alan_jones_age_grade_2010",
+            "alan_jones_age_grade_2025",
+            "age_grade_mapped_time_male",
+            "age_grade_mapped_time_female",
+        ]:
+            if col not in df.columns:
+                df[col] = pd.NA
+        log.debug("[alan] STANDARDS_2010 empty; skipping annotation for this df.")
         return df
 
     for col in [
@@ -440,37 +470,107 @@ def annotate_age_grade_extras(df: pd.DataFrame) -> pd.DataFrame:
         if col not in df.columns:
             df[col] = pd.NA
 
+    skipped_no_inputs = 0
+    skipped_no_sex = 0
+    skipped_no_time = 0
+    skipped_no_age_range = 0
+    skipped_no_standards = 0
+
     for idx, row in df.iterrows():
         ag = row.get("age_grade")
-        time_str = row.get("time")
+        raw_time = row.get("time")
         age_group = row.get("age_group")
         gender = row.get("gender")
+        event_no = row.get("event", None)
+
+        # Normalise time *before* we check for empties
+        time_str = clean_time_string(raw_time)
+        if time_str:
+            # keep the cleaned time in the df so it gets written back to CSV
+            df.at[idx, "time"] = time_str
 
         if pd.isna(ag) or not time_str or pd.isna(age_group):
+            # optional: upgrade your skip-no-inputs logging if you want
+            # but the existing counters are fine
             continue
 
         sex_code = _sex_from_gender_and_agegroup(gender, age_group)
         if sex_code not in {"M", "W"}:
+            skipped_no_sex += 1
+            if log.isEnabledFor(logging.DEBUG):
+                log.debug(
+                    "[alan][skip-no-sex] idx=%s event=%s name=%s %s id=%s "
+                    "gender=%r age_group=%r",
+                    idx,
+                    event_no,
+                    row.get("name_first"),
+                    row.get("name_last"),
+                    row.get("id"),
+                    gender,
+                    age_group,
+                )
             continue
 
-        time_sec = parse_time_to_seconds(str(time_str))
+        time_sec = parse_time_to_seconds(time_str)
         if time_sec is None or time_sec <= 0:
+            skipped_no_time += 1
+            if log.isEnabledFor(logging.DEBUG):
+                log.debug(
+                    "[alan][skip-no-time] idx=%s event=%s name=%s %s id=%s "
+                    "gender=%r age_group=%r time_raw=%r time_clean=%r",
+                    idx,
+                    event_no,
+                    row.get("name_first"),
+                    row.get("name_last"),
+                    row.get("id"),
+                    gender,
+                    age_group,
+                    raw_time,
+                    time_str,
+                )
             continue
 
         # Infer best age in the group's range by matching parkrun age_grade with 2010 standards
         sx_ag, age_min, age_max = parse_age_group(age_group)
         sx = sx_ag if sx_ag in {"M", "W"} else sex_code
         if age_min is None or age_max is None:
+            skipped_no_age_range += 1
+            if log.isEnabledFor(logging.DEBUG):
+                log.debug(
+                    "[alan][skip-no-range] idx=%s event=%s name=%s %s id=%s "
+                    "gender=%r age_group=%r parsed=(sx_ag=%r, age_min=%r, age_max=%r)",
+                    idx,
+                    event_no,
+                    row.get("name_first"),
+                    row.get("name_last"),
+                    row.get("id"),
+                    gender,
+                    age_group,
+                    sx_ag,
+                    age_min,
+                    age_max,
+                )
             continue
 
         best_age = None
         best_pred_2010 = None
         best_err = None
 
+        if log.isEnabledFor(logging.DEBUG):
+            # For debugging: record which ages in the band actually have standards
+            ages_with_std = []
+            ages_without_std = []
+
         for age in range(int(age_min), int(age_max) + 1):
             std_2010 = STANDARDS_2010.get((sx, age))
             if std_2010 is None:
+                if log.isEnabledFor(logging.DEBUG):
+                    ages_without_std.append(age)
                 continue
+
+            if log.isEnabledFor(logging.DEBUG):
+                ages_with_std.append(age)
+
             pred = 100.0 * (std_2010 / time_sec)
             err = abs(pred - ag)
             if best_err is None or err < best_err:
@@ -479,16 +579,37 @@ def annotate_age_grade_extras(df: pd.DataFrame) -> pd.DataFrame:
                 best_pred_2010 = pred
 
         if best_age is None:
+            skipped_no_standards += 1
+            if log.isEnabledFor(logging.DEBUG):
+                log.debug(
+                    "[alan][no-standards-match] idx=%s event=%s name=%s %s id=%s "
+                    "gender=%r age_group=%r sx=%r age_range=%s-%s age_grade=%r time_sec=%r "
+                    "ages_with_std=%r ages_without_std=%r",
+                    idx,
+                    event_no,
+                    row.get("name_first"),
+                    row.get("name_last"),
+                    row.get("id"),
+                    gender,
+                    age_group,
+                    sx,
+                    age_min,
+                    age_max,
+                    ag,
+                    time_sec,
+                    ages_with_std if 'ages_with_std' in locals() else None,
+                    ages_without_std if 'ages_without_std' in locals() else None,
+                )
             continue
 
         # 2010 age grade (will be ~ equal to parkrun's age_grade)
-        df.at[idx, "alan_jones_age_grade_2010"] = best_pred_2010
+        df.at[idx, "alan_jones_age_grade_2010"] = round(best_pred_2010, 2)
 
         # 2025 age grade at same inferred age, if available
         std_2025 = STANDARDS_2025.get((sx, best_age))
         if std_2025 is not None:
             pred_2025 = 100.0 * (std_2025 / time_sec)
-            df.at[idx, "alan_jones_age_grade_2025"] = pred_2025
+            df.at[idx, "alan_jones_age_grade_2025"] = round(pred_2025, 2)
 
         # Mapped times for peak male/female age (2010)
         if ag and ag > 0:
@@ -498,6 +619,20 @@ def annotate_age_grade_extras(df: pd.DataFrame) -> pd.DataFrame:
             if BEST_STD_2010_FEMALE is not None:
                 t_fem = BEST_STD_2010_FEMALE * 100.0 / ag
                 df.at[idx, "age_grade_mapped_time_female"] = seconds_to_time_str(int(round(t_fem)))
+
+    # Per-DataFrame summary at INFO (so you see it even without --verbose)
+    total_rows = len(df)
+    if total_rows > 0:
+        log.info(
+            "[alan] annotated df rows=%d; skipped_no_inputs=%d, skipped_no_sex=%d, "
+            "skipped_no_time=%d, skipped_no_age_range=%d, skipped_no_standards=%d",
+            total_rows,
+            skipped_no_inputs,
+            skipped_no_sex,
+            skipped_no_time,
+            skipped_no_age_range,
+            skipped_no_standards,
+        )
 
     return df
 
@@ -675,9 +810,10 @@ def parse_results_table(event_no: int, html: str) -> EventData:
 
         # time is last cell; strip PB / first timer annotations
         time_cell = tds[-1]
-        time_str = soup_text(time_cell) if time_cell else None
-        if time_str:
-            time_str = re.sub(r"(New\s*PB!?|First\s*Timer!?|PB\s*)", "", time_str, flags=re.I).strip()
+        time_str_raw = soup_text(time_cell) if time_cell else None
+        time_str = clean_time_string(time_str_raw) if time_str_raw else ""
+        if not time_str:
+            time_str = None
 
         rows.append(
             EventRow(
@@ -831,6 +967,20 @@ def save_event_df(event_no: int, df: pd.DataFrame) -> str:
 
 # ------------------------- Aggregation helpers -------------------------
 
+def identity_key(row: pd.Series) -> str:
+    """
+    Build a stable identity key for a parkrunner:
+      - Prefer non-empty id
+      - Otherwise fall back to normalized full name (lowercased)
+    """
+    pid = row.get("id")
+    if pd.notnull(pid) and str(pid).strip() != "":
+        return str(pid).strip()
+    first = str(row.get("name_first", "") or "").strip()
+    last = str(row.get("name_last", "") or "").strip()
+    return f"{first} {last}".strip().lower()
+
+
 def autodiscover_max_event(
     base_url: str,
     start: int = 1,
@@ -891,11 +1041,14 @@ def update_master_participants(all_event_dfs: Dict[int, pd.DataFrame]) -> pd.Dat
       - gender, age_group (latest known)
       - pb_time, pb_position, pb_age_grade
       - num_runs, num_volunteers, num_participations
-      - volunteer_percentage
+      - volunteer_percentage (rounded to nearest integer):
+          100 * (# events where they volunteered)
+                / (# events where they ran or volunteered)
 
     Additionally writes:
       - parkruns_master.csv  (one row per *run* where runner == 1)
-      - volunteers_master.csv (one row per *volunteer instance* where volunteer == 1)
+      - volunteers_master.csv (one row per *volunteer instance* where volunteer == 1,
+                               deduped to one row per person+event)
     """
     if not all_event_dfs:
         log.warning("No event data frames provided; cannot update master participants.")
@@ -908,15 +1061,16 @@ def update_master_participants(all_event_dfs: Dict[int, pd.DataFrame]) -> pd.Dat
         [df.assign(event=evno) for evno, df in all_event_dfs.items()],
         ignore_index=True
     )
-
+    
     # Helper boolean columns
+    all_events_concat["time"] = all_events_concat["time"].apply(clean_time_string)
     all_events_concat["time_sec"] = all_events_concat["time"].apply(parse_time_to_seconds)
     all_events_concat["is_run"] = pd.to_numeric(all_events_concat["runner"], errors="coerce").fillna(0) == 1
     all_events_concat["is_volunteer"] = pd.to_numeric(all_events_concat["volunteer"], errors="coerce").fillna(0) == 1
     all_events_concat["is_participant"] = pd.to_numeric(all_events_concat["participant"], errors="coerce").fillna(0) == 1
 
     # -----------------------------
-    # NEW: parkruns_master.csv
+    # parkruns_master.csv
     # -----------------------------
     try:
         parkruns_master_df = all_events_concat.loc[all_events_concat["is_run"], [
@@ -937,7 +1091,10 @@ def update_master_participants(all_event_dfs: Dict[int, pd.DataFrame]) -> pd.Dat
             "time",
             "event",
         ]].copy()
-
+        
+        parkruns_master_df["position"] = (
+            pd.to_numeric(parkruns_master_df["position"], errors="coerce").astype("Int64")
+        )
         parkruns_master_df["id"] = parkruns_master_df["id"].astype("string")
         parkruns_master_df.to_csv(PARKRUNS_MASTER_CSV, index=False)
         log.info(
@@ -948,17 +1105,34 @@ def update_master_participants(all_event_dfs: Dict[int, pd.DataFrame]) -> pd.Dat
         log.error(f"Error building parkruns_master.csv (missing column): {e}")
 
     # -----------------------------
-    # NEW: volunteers_master.csv
+    # volunteers_master.csv
     # -----------------------------
+
+    # Identity helper for deduping (id preferred, else name)
+    def identity_key(row):
+        return row["id"] if pd.notnull(row.get("id")) and str(row.get("id")).strip() != "" \
+               else (f"{row.get('name_first','')} {row.get('name_last','')}").strip().lower()
+
     try:
         volunteers_master_df = all_events_concat.loc[all_events_concat["is_volunteer"], [
             "name_first",
             "name_last",
             "id",
+            "event",
             "first_time_volunteer",
         ]].copy()
 
         volunteers_master_df["id"] = volunteers_master_df["id"].astype("string")
+        volunteers_master_df["identity"] = volunteers_master_df.apply(identity_key, axis=1)
+
+        # Sort so that if any row has first_time_volunteer == 1, we keep that one
+        volunteers_master_df = (
+            volunteers_master_df
+            .sort_values(["identity", "event", "first_time_volunteer"], ascending=[True, True, False])
+            .drop_duplicates(subset=["identity", "event"], keep="first")
+            .drop(columns=["identity"])
+        )
+
         volunteers_master_df.to_csv(VOLUNTEERS_MASTER_CSV, index=False)
         log.info(
             f"Wrote volunteers master CSV -> {VOLUNTEERS_MASTER_CSV} "
@@ -968,13 +1142,10 @@ def update_master_participants(all_event_dfs: Dict[int, pd.DataFrame]) -> pd.Dat
         log.error(f"Error building volunteers_master.csv (missing column): {e}")
 
     # -----------------------------
-    # Existing participants_master logic
+    # participants_master logic
     # -----------------------------
 
-    def identity_key(row):
-        return row["id"] if pd.notnull(row.get("id")) and str(row.get("id")).strip() != "" \
-               else (f"{row.get('name_first','')} {row.get('name_last','')}").strip().lower()
-
+    # Reuse identity_key for grouping
     all_events_concat["identity"] = all_events_concat.apply(identity_key, axis=1)
 
     master = []
@@ -988,15 +1159,31 @@ def update_master_participants(all_event_dfs: Dict[int, pd.DataFrame]) -> pd.Dat
         num_runs = runs["event"].nunique()
         num_vols = vols["event"].nunique()
         num_parts = parts["event"].nunique()
-        total_events = max(num_runs + num_vols, 1)
-        volunteer_percentage = 100.0 * num_vols / total_events
+
+        # Denominator should be "events they participated in" (run or volunteer),
+        # so that run+vol in the same event counts as 1 event.
+        total_events = max(num_parts, 1)
+
+        # volunteer_percentage rounded to nearest integer
+        volunteer_percentage = int(round(100.0 * num_vols / total_events))
 
         pb_run = runs.dropna(subset=["time_sec"]).sort_values("time_sec").head(1)
         if not pb_run.empty:
             pb_row = pb_run.iloc[0]
             pb_time_sec = int(pb_row["time_sec"])
             pb_time_str = seconds_to_time_str(pb_time_sec)
+
             pb_position = pb_row.get("position")
+
+            # Ensure pb_position is an integer if present
+            if pd.notna(pb_position):
+                try:
+                    pb_position = int(round(float(pb_position)))
+                except Exception:
+                    pb_position = None
+            else:
+                pb_position = None
+
             pb_age_grade = pb_row.get("age_grade")
             pb_aj2010 = pb_row.get("alan_jones_age_grade_2010")
             pb_aj2025 = pb_row.get("alan_jones_age_grade_2025")
@@ -1013,8 +1200,19 @@ def update_master_participants(all_event_dfs: Dict[int, pd.DataFrame]) -> pd.Dat
             pb_map_fem = None
 
         latest_row = g_sorted.iloc[-1]
-        gender = latest_row.get("gender")
-        age_group = latest_row.get("age_group")
+
+        # Best-known gender / age_group across all their rows
+        def _clean(s: pd.Series) -> pd.Series:
+            s = s.astype("string")
+            return s.where(s.str.strip().ne(""), pd.NA)
+
+        gender_series = _clean(g_sorted.get("gender", pd.Series(dtype="string")))
+        agegroup_series = _clean(g_sorted.get("age_group", pd.Series(dtype="string")))
+
+        gender = gender_series.dropna().iloc[-1] if gender_series.notna().any() else None
+        age_group = agegroup_series.dropna().iloc[-1] if agegroup_series.notna().any() else None
+
+        # Latest name and id
         name_first = latest_row.get("name_first")
         name_last = latest_row.get("name_last")
         pid = latest_row.get("id")
@@ -1038,8 +1236,11 @@ def update_master_participants(all_event_dfs: Dict[int, pd.DataFrame]) -> pd.Dat
             "volunteer_percentage": volunteer_percentage,
         })
 
-
     master_df = pd.DataFrame(master)
+    master_df["pb_position"] = (
+        pd.to_numeric(master_df["pb_position"], errors="coerce")
+        .astype("Int64")
+    )
     master_df.to_csv(MASTER_PARTICIPANTS_CSV, index=False)
     log.info(f"Wrote master participants CSV -> {MASTER_PARTICIPANTS_CSV} (rows={len(master_df)})")
     return master_df
@@ -1466,8 +1667,72 @@ def main():
         log.info(f"[event {evno}] scraped & saved (rows={len(df_event)})")
     
     # Ensure all loaded events have the derived age-grade fields
+    if not all_event_dfs:
+        log.error("No event data collected; exiting.")
+        return 1
+
+    # ------------------------------------------------------------------
+    # NEW: Backfill gender and age_group across all events by identity
+    # ------------------------------------------------------------------
+    # Build a single big DataFrame of all events
+    concat_list = []
+    for evno, df in all_event_dfs.items():
+        df_tmp = df.copy()
+        df_tmp["event"] = evno  # ensure event column present
+        concat_list.append(df_tmp)
+    all_concat = pd.concat(concat_list, ignore_index=True)
+
+    # Compute identity for each row
+    all_concat["identity"] = all_concat.apply(identity_key, axis=1)
+
+    # Treat empty strings as missing
+    def _clean_series(s: pd.Series) -> pd.Series:
+        s = s.astype("string")
+        return s.where(s.str.strip().ne(""), pd.NA)
+
+    all_concat["gender"] = _clean_series(all_concat.get("gender", pd.Series(dtype="string")))
+    all_concat["age_group"] = _clean_series(all_concat.get("age_group", pd.Series(dtype="string")))
+
+    # For each identity, pick the *last known non-null* gender and age_group
+    non_null_gender = (
+        all_concat[all_concat["gender"].notna()]
+        .sort_values(["identity", "event", "position"], ascending=[True, True, True])
+        .groupby("identity")["gender"]
+        .last()
+    )
+    non_null_agegroup = (
+        all_concat[all_concat["age_group"].notna()]
+        .sort_values(["identity", "event", "position"], ascending=[True, True, True])
+        .groupby("identity")["age_group"]
+        .last()
+    )
+
+    id_to_gender = non_null_gender.to_dict()
+    id_to_agegroup = non_null_agegroup.to_dict()
+
+    # ------------------------------------------------------------------
+    # Ensure all loaded events have backfilled gender/age_group
+    # and derived age-grade fields
+    # ------------------------------------------------------------------
     for evno, df in list(all_event_dfs.items()):
-        df2 = annotate_age_grade_extras(df.copy())
+        df2 = df.copy()
+
+        # Compute identity for this event's rows
+        df2["identity"] = df2.apply(identity_key, axis=1)
+
+        # Clean current gender/age_group and then fill from maps
+        df2["gender"] = _clean_series(df2.get("gender", pd.Series(dtype="string")))
+        df2["age_group"] = _clean_series(df2.get("age_group", pd.Series(dtype="string")))
+
+        df2["gender"] = df2["gender"].fillna(df2["identity"].map(id_to_gender))
+        df2["age_group"] = df2["age_group"].fillna(df2["identity"].map(id_to_agegroup))
+
+        # Drop identity from final CSVs
+        df2 = df2.drop(columns=["identity"])
+
+        # Recompute derived Alan Jones / mapped-time fields now that
+        # gender/age_group may be more complete
+        df2 = annotate_age_grade_extras(df2)
         df2 = normalize_columns(df2, evno)
         save_event_df(evno, df2)
         all_event_dfs[evno] = df2
