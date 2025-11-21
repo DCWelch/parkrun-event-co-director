@@ -129,41 +129,6 @@ def _add_centered_background_logo(fig: plt.Figure, alpha: float = LOGO_ALPHA):
     )
     fig.add_artist(ab)
 
-def _style_table_cells(table, df: pd.DataFrame, highlight_gender: bool):
-    n_rows, n_cols = df.shape
-
-    for (row, col), cell in table.get_celld().items():
-        txt = cell.get_text()
-
-        if row == 0:
-            cell.set_text_props(color=PARKRUN_PURPLE,
-                                fontweight="bold",
-                                fontsize=HEADER_SIZE)
-            cell.set_facecolor(NEAR_WHITE)
-        else:
-            cell.set_facecolor(PARKRUN_PURPLE)
-            cell.set_edgecolor(NEAR_WHITE)
-            cell.set_linewidth(BORDER_LW)
-            txt.set_color(NEAR_WHITE)
-
-        x, y = txt.get_position()
-        txt.set_position((x, y + CELL_Y_OFFSET))
-
-    if highlight_gender and "Gender" in df.columns:
-        gender_col_idx = list(df.columns).index("Gender")
-        for row_idx in range(1, n_rows + 1):
-            gender_val = str(df.iloc[row_idx - 1, gender_col_idx]).strip().lower()
-            color = None
-            if gender_val.startswith("m"):
-                color = PARKRUN_YELLOW
-            elif gender_val.startswith("f"):
-                color = PARKRUN_TEAL
-            if color:
-                gcell = table[row_idx, gender_col_idx]
-                gcell.set_facecolor(color)
-                gcell.get_text().set_color(PARKRUN_PURPLE)
-                gcell.set_linewidth(BORDER_LW)
-
 def _draw_table(df: pd.DataFrame,
                 title: str,
                 outpath: Path,
@@ -278,12 +243,6 @@ def load_parkrunner_summary() -> pd.DataFrame:
     Load the master participants file produced by parkrun_event_data_organizer.py
     (participants_master.csv) and reshape it into the columns expected by the
     leaderboard logic.
-
-    participants_master.csv columns (from update_master_participants):
-        name_first, name_last, id, gender, age_group,
-        pb_position, pb_age_grade, pb_time,
-        num_runs, num_volunteers, num_participations,
-        volunteer_percentage
     """
     if not PARKRUNNER_SUMMARY_CSV.exists():
         raise FileNotFoundError(
@@ -298,9 +257,6 @@ def load_parkrunner_summary() -> pd.DataFrame:
     ).str.strip()
 
     # ---- Remove placeholder / unknown parkrunners ----
-    # Common patterns:
-    #   parkrunner == "Unknown"
-    #   name_first == "Unknown", name_last empty, etc.
     name_lower = df["parkrunner"].str.strip().str.lower()
     is_unknown = name_lower.isin(
         [
@@ -310,7 +266,6 @@ def load_parkrunner_summary() -> pd.DataFrame:
             "unknown volunteer",
         ]
     )
-    # Also drop completely empty names just in case
     is_empty = df["parkrunner"].str.strip().eq("")
     df = df[~(is_unknown | is_empty)].copy()
 
@@ -337,17 +292,15 @@ def load_parkrunner_summary() -> pd.DataFrame:
 
     return df
 
-def _normalize_gender(g: Any) -> str:
-    s = str(g).strip().lower()
-    if s.startswith("m"):
-        return "Male"
-    if s.startswith("f"):
-        return "Female"
-    return ""
-
 # ========================= Leaderboard builders =========================
 
 def make_top_times(df: pd.DataFrame, top_n: int, gender: Optional[str] = None) -> pd.DataFrame:
+    """
+    Top course times (overall or gender-filtered).
+
+    Desired columns:
+      Rank, parkrunner, Time
+    """
     sub = df.copy()
     if gender is not None:
         g_norm = gender.lower()[0]  # 'm' or 'f'
@@ -356,29 +309,29 @@ def make_top_times(df: pd.DataFrame, top_n: int, gender: Optional[str] = None) -
     sub = sub.dropna(subset=[BEST_TIME_SEC_COL])
     sub = sub.sort_values(BEST_TIME_SEC_COL, ascending=True).head(top_n)
 
-    # If there's no pretty time column, format one
+    # Pretty time column
     if BEST_TIME_STR_COL in sub.columns:
         time_str = sub[BEST_TIME_STR_COL].apply(str)
     else:
         time_str = sub[BEST_TIME_SEC_COL].apply(fmt_sec_mmss)
 
-    agegrade_str = (sub[BEST_AGEGRADE_COL]
-                    .apply(lambda x: f"{float(x):.2f}" if pd.notna(x) else ""))
-
     rows = []
-    for rank, (_, row) in enumerate(sub.iterrows(), start=1):
+    for rank, (idx, row) in enumerate(sub.iterrows(), start=1):
         rows.append({
             "Rank": rank,
-#            "Gender": _normalize_gender(row.get(GENDER_COL, "")),
-            "Time": time_str.loc[row.name],
-            "Age Grade": agegrade_str.loc[row.name],
             "parkrunner": row.get(NAME_COL, ""),
-            "Age Group": row.get(AGE_GROUP_COL, ""),
+            "Time": time_str.loc[idx],
         })
 
     return pd.DataFrame(rows)
 
 def make_top_agegrades(df: pd.DataFrame, top_n: int, gender: Optional[str] = None) -> pd.DataFrame:
+    """
+    Top age grades (overall or gender-filtered).
+
+    Desired columns:
+      Rank, parkrunner, Age Grade, Time, Age Group
+    """
     sub = df.copy()
     if gender is not None:
         g_norm = gender.lower()[0]
@@ -396,32 +349,75 @@ def make_top_agegrades(df: pd.DataFrame, top_n: int, gender: Optional[str] = Non
                     .apply(lambda x: f"{float(x):.2f}" if pd.notna(x) else ""))
 
     rows = []
-    for rank, (_, row) in enumerate(sub.iterrows(), start=1):
+    for rank, (idx, row) in enumerate(sub.iterrows(), start=1):
         rows.append({
             "Rank": rank,
-#            "Gender": _normalize_gender(row.get(GENDER_COL, "")),
-            "Age Grade": agegrade_str.loc[row.name],
-            "Time": time_str.loc[row.name],
             "parkrunner": row.get(NAME_COL, ""),
+            "Age Grade": agegrade_str.loc[idx],
+            "Time": time_str.loc[idx],
             "Age Group": row.get(AGE_GROUP_COL, ""),
         })
 
     return pd.DataFrame(rows)
 
-def make_top_count(df: pd.DataFrame, col: str, top_n: int, label: str) -> pd.DataFrame:
+def make_top_parkruns(df: pd.DataFrame, top_n: int) -> pd.DataFrame:
+    """
+    Top parkruns:
+
+      Rank, parkrunner, parkruns
+    """
     sub = df.copy()
-    sub = sub.dropna(subset=[col])
-    sub = sub.sort_values(col, ascending=False).head(top_n)
+    sub = sub.dropna(subset=[PARKRUNS_COL])
+    sub = sub.sort_values(PARKRUNS_COL, ascending=False).head(top_n)
 
     rows = []
     for rank, (_, row) in enumerate(sub.iterrows(), start=1):
         rows.append({
             "Rank": rank,
             "parkrunner": row.get(NAME_COL, ""),
-#            "Gender": _normalize_gender(row.get(GENDER_COL, "")),
-            label: int(row.get(col, 0)),
-            "parkruns": int(row.get(PARKRUNS_COL, 0)) if PARKRUNS_COL in sub.columns else "",
-            "Participations": int(row.get(PARTICIPATIONS_COL, 0)) if PARTICIPATIONS_COL in sub.columns else "",
+            "parkruns": int(row.get(PARKRUNS_COL, 0)),
+        })
+
+    return pd.DataFrame(rows)
+
+def make_top_volunteers(df: pd.DataFrame, top_n: int) -> pd.DataFrame:
+    """
+    Top volunteers:
+
+      Rank, parkrunner, Volunteers
+    """
+    sub = df.copy()
+    sub = sub.dropna(subset=[VOLUNTEER_ROLES_COL])
+    sub = sub.sort_values(VOLUNTEER_ROLES_COL, ascending=False).head(top_n)
+
+    rows = []
+    for rank, (_, row) in enumerate(sub.iterrows(), start=1):
+        rows.append({
+            "Rank": rank,
+            "parkrunner": row.get(NAME_COL, ""),
+            "Volunteers": int(row.get(VOLUNTEER_ROLES_COL, 0)),
+        })
+
+    return pd.DataFrame(rows)
+
+def make_top_participations(df: pd.DataFrame, top_n: int) -> pd.DataFrame:
+    """
+    Top participations:
+
+      Rank, parkrunner, Participations, parkruns, Volunteers
+    """
+    sub = df.copy()
+    sub = sub.dropna(subset=[PARTICIPATIONS_COL])
+    sub = sub.sort_values(PARTICIPATIONS_COL, ascending=False).head(top_n)
+
+    rows = []
+    for rank, (_, row) in enumerate(sub.iterrows(), start=1):
+        rows.append({
+            "Rank": rank,
+            "parkrunner": row.get(NAME_COL, ""),
+            "Participations": int(row.get(PARTICIPATIONS_COL, 0)),
+            "parkruns": int(row.get(PARKRUNS_COL, 0)),
+            "Volunteers": int(row.get(VOLUNTEER_ROLES_COL, 0)),
         })
 
     return pd.DataFrame(rows)
@@ -432,93 +428,95 @@ def main(top_n: int):
     event_name = load_event_name(default_name="Unknown")
     df = load_parkrunner_summary()
 
-    # ---- 1–3: Course Times ----
-    top_times_all    = make_top_times(df, top_n, gender=None)
-    top_times_male   = make_top_times(df, top_n, gender="M")
-    top_times_female = make_top_times(df, top_n, gender="F")
-
-    _draw_table(
-        top_times_all,
-        title=f"{event_name} parkrun\nTop-{top_n} Course Times",
-        outpath=LEADERBOARD_DIR / f"top_{top_n}_times.png",
-        highlight_gender=True,
-        extra_top_margin=0.0,
-    )
-    _draw_table(
-        top_times_male,
-        title=f"{event_name} parkrun\nTop-{top_n} Course Times (Male)",
-        outpath=LEADERBOARD_DIR / f"top_{top_n}_times_male.png",
-        highlight_gender=True,
-        extra_top_margin=0.0,
-    )
-    _draw_table(
-        top_times_female,
-        title=f"{event_name} parkrun\nTop-{top_n} Course Times (Female)",
-        outpath=LEADERBOARD_DIR / f"top_{top_n}_times_female.png",
-        highlight_gender=True,
-        extra_top_margin=0.0,
-    )
-
-    # ---- 4–6: Age Grades ----
+    # ---- 1–3: Age Grades ----
     top_ag_all    = make_top_agegrades(df, top_n, gender=None)
-    top_ag_male   = make_top_agegrades(df, top_n, gender="M")
     top_ag_female = make_top_agegrades(df, top_n, gender="F")
+    top_ag_male   = make_top_agegrades(df, top_n, gender="M")
 
     _draw_table(
         top_ag_all,
         title=f"{event_name} parkrun\nTop-{top_n} Age Grades",
         outpath=LEADERBOARD_DIR / f"top_{top_n}_agegrades.png",
-        highlight_gender=True,
-        extra_top_margin=0.0,
-    )
-    _draw_table(
-        top_ag_male,
-        title=f"{event_name} parkrun\nTop-{top_n} Age Grades (Male)",
-        outpath=LEADERBOARD_DIR / f"top_{top_n}_agegrades_male.png",
-        highlight_gender=True,
+        highlight_gender=False,
         extra_top_margin=0.0,
     )
     _draw_table(
         top_ag_female,
         title=f"{event_name} parkrun\nTop-{top_n} Age Grades (Female)",
         outpath=LEADERBOARD_DIR / f"top_{top_n}_agegrades_female.png",
-        highlight_gender=True,
+        highlight_gender=False,
+        extra_top_margin=0.0,
+    )
+    _draw_table(
+        top_ag_male,
+        title=f"{event_name} parkrun\nTop-{top_n} Age Grades (Male)",
+        outpath=LEADERBOARD_DIR / f"top_{top_n}_agegrades_male.png",
+        highlight_gender=False,
         extra_top_margin=0.0,
     )
 
-    # ---- 7–9: Counts ----
-    if VOLUNTEER_ROLES_COL in df.columns:
-        top_volunteers = make_top_count(df, VOLUNTEER_ROLES_COL, top_n, label="Volunteers")
-        _draw_table(
-            top_volunteers,
-            title=f"{event_name} parkrun\nTop-{top_n} Most Volunteers",
-            outpath=LEADERBOARD_DIR / f"top_{top_n}_volunteers.png",
-            highlight_gender=True,
-            extra_top_margin=0.0,
-        )
-        print("Wrote volunteer leaderboard")
-
+    # ---- 4: parkruns ----
     if PARKRUNS_COL in df.columns:
-        top_runs = make_top_count(df, PARKRUNS_COL, top_n, label="parkruns")
+        top_runs = make_top_parkruns(df, top_n)
         _draw_table(
             top_runs,
             title=f"{event_name} parkrun\nTop-{top_n} Most parkruns",
             outpath=LEADERBOARD_DIR / f"top_{top_n}_parkruns.png",
-            highlight_gender=True,
+            highlight_gender=False,
             extra_top_margin=0.0,
         )
         print("Wrote parkruns leaderboard")
 
+    # ---- 5: participations ----
     if PARTICIPATIONS_COL in df.columns:
-        top_participations = make_top_count(df, PARTICIPATIONS_COL, top_n, label="Participations")
+        top_participations = make_top_participations(df, top_n)
         _draw_table(
             top_participations,
             title=f"{event_name} parkrun\nTop-{top_n} Most Participations",
             outpath=LEADERBOARD_DIR / f"top_{top_n}_participations.png",
-            highlight_gender=True,
+            highlight_gender=False,
             extra_top_margin=0.0,
         )
         print("Wrote participations leaderboard")
+
+    # ---- 9: volunteers ----
+    if VOLUNTEER_ROLES_COL in df.columns:
+        top_volunteers = make_top_volunteers(df, top_n)
+        _draw_table(
+            top_volunteers,
+            title=f"{event_name} parkrun\nTop-{top_n} Most Volunteers",
+            outpath=LEADERBOARD_DIR / f"top_{top_n}_volunteers.png",
+            highlight_gender=False,
+            extra_top_margin=0.0,
+        )
+        print("Wrote volunteer leaderboard")
+
+    # ---- 6–8: Course Times ----
+    top_times_all    = make_top_times(df, top_n, gender=None)
+    top_times_female = make_top_times(df, top_n, gender="F")
+    top_times_male   = make_top_times(df, top_n, gender="M")
+
+    _draw_table(
+        top_times_all,
+        title=f"{event_name} parkrun\nTop-{top_n} Course Times",
+        outpath=LEADERBOARD_DIR / f"top_{top_n}_times.png",
+        highlight_gender=False,
+        extra_top_margin=0.0,
+    )
+    _draw_table(
+        top_times_female,
+        title=f"{event_name} parkrun\nTop-{top_n} Course Times (Female)",
+        outpath=LEADERBOARD_DIR / f"top_{top_n}_times_female.png",
+        highlight_gender=False,
+        extra_top_margin=0.0,
+    )
+    _draw_table(
+        top_times_male,
+        title=f"{event_name} parkrun\nTop-{top_n} Course Times (Male)",
+        outpath=LEADERBOARD_DIR / f"top_{top_n}_times_male.png",
+        highlight_gender=False,
+        extra_top_margin=0.0,
+    )
 
     print(f"Leaderboards written to: {LEADERBOARD_DIR}")
 

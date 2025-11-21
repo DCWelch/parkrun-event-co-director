@@ -211,7 +211,7 @@ def _draw_table(df, title, outpath, highlight_gender=True, extra_top_margin=0.0)
     for (row, col), cell in table.get_celld().items():
         txt = cell.get_text()
 
-        cell.PAD = 0#0.15
+        cell.PAD = 0
 
         if row == 0:
             cell.set_text_props(color=PARKRUN_PURPLE, fontweight="bold", fontsize=HEADER_SIZE)
@@ -255,7 +255,6 @@ def _draw_combined_course_records(best_times_df: pd.DataFrame,
     Draw a single image with two stacked tables:
       - "Times"
       - "Age Grades"
-    with corrected, tight margins and no overlapping titles.
     """
 
     max_cols = max(best_times_df.shape[1], best_agegrades_df.shape[1])
@@ -380,7 +379,14 @@ def build_overall_best_tables(pe: pd.DataFrame):
     From the progression series, extract overall best times and age-grades
     (male & female) and return three DataFrames:
       best_times_df, best_agegrades_df, combined_df.
-    Column names use consistent title casing.
+
+    Display-column targets:
+
+      best_times_df (for tables 1 & times part of 3):
+        Gender, Time, parkrunner
+
+      best_agegrades_df (for tables 2 & age-grade part of 3):
+        Gender, Age Grade, parkrunner, Age Group, Time
     """
     last = pe.sort_values("event").iloc[-1]
 
@@ -398,7 +404,7 @@ def build_overall_best_tables(pe: pd.DataFrame):
                 if pd.notna(last.get("cr_male_time_agegrade")) else ""
             ),
         },
-                {
+        {
             "Gender": "Female",
             "Time": last.get("cr_female_time", ""),
             "Set at Event": int(last.get("cr_female_time_set_at_event"))
@@ -412,6 +418,10 @@ def build_overall_best_tables(pe: pd.DataFrame):
         },
     ]
     best_times_df = pd.DataFrame(best_times_rows)
+
+    # Keep only the columns you want to display, in your desired order:
+    # Gender, Time, parkrunner
+    best_times_df = best_times_df[["Gender", "Time", "parkrunner"]]
 
     # ---- Best age-grade table (overall course records by age-grade) ----
     best_ag_rows: List[Dict[str, Any]] = [
@@ -442,7 +452,13 @@ def build_overall_best_tables(pe: pd.DataFrame):
     ]
     best_agegrades_df = pd.DataFrame(best_ag_rows)
 
-    # ---- Combined DF (kept for compatibility / future use) ----
+    # Keep only the display columns, in the desired order:
+    # Gender, Age Grade, parkrunner, Age Group, Time
+    best_agegrades_df = best_agegrades_df[
+        ["Gender", "Age Grade", "parkrunner", "Age Group", "Time"]
+    ]
+
+    # ---- Combined DF (still returned, not used in plotting right now) ----
     combined_rows: List[Dict[str, Any]] = []
     for sex in ["male", "female"]:
         gender_label = "Male" if sex == "male" else "Female"
@@ -541,31 +557,28 @@ def main():
     # 1) Times-only table
     _draw_table(
         best_times_df,
-        title=f"{event_name} parkrun Course Records",
+        title=f"{event_name} parkrun Course Records (Times)",
         outpath=BEST_TIMES_TABLE_PNG,
         highlight_gender=True,
         extra_top_margin=0.1,
     )
-    print(f"Wrote best times table -> {BEST_TIMES_TABLE_PNG}")
 
     # 2) Age-grade-only table
     _draw_table(
         best_agegrades_df,
-        title=f"{event_name} parkrun Age Grade Course Records",
+        title=f"{event_name} parkrun Course Records (Age Grades)",
         outpath=BEST_AGEGRADES_TABLE_PNG,
         highlight_gender=True,
         extra_top_margin=0.1,
     )
-    print(f"Wrote best age-grade table -> {BEST_AGEGRADES_TABLE_PNG}")
 
-    # 3) Combined image with Times + Age Grades stacked
+    # 3) Combined image (Times + Age Grades)
     _draw_combined_course_records(
         best_times_df,
         best_agegrades_df,
         title=f"{event_name} parkrun Course Records",
         outpath=BEST_OVERALL_TABLE_PNG,
     )
-    print(f"Wrote combined course-records table -> {BEST_OVERALL_TABLE_PNG}")
 
     # 4) Age-group best times
     ag_best_df = load_agegroup_best_times()
@@ -573,7 +586,7 @@ def main():
         print("No age-group course-record series CSVs found; skipping age-group table.")
         return
 
-    # Header text tweaks for display
+    # Rename headers for CSV + table usage
     ag_best_df = ag_best_df.rename(columns={
         "Age group": "Age Group",
         "Time": "Time",
@@ -581,11 +594,15 @@ def main():
         "Age grade (%)": "Age Grade",
     })
 
+    # --- CSV (keep all columns) ---
     ag_best_df.to_csv(AGEGROUP_BEST_TIMES_CSV, index=False)
     print(f"Wrote age-group best-times CSV -> {AGEGROUP_BEST_TIMES_CSV}")
 
+    # --- PNG table ---
+    ag_best_display = ag_best_df[["Age Group", "parkrunner", "Time"]]
+
     _draw_table(
-        ag_best_df,
+        ag_best_display,
         title=f"{event_name} parkrun\nAge Group Course Records",
         outpath=AGEGROUP_BEST_TIMES_PNG,
         highlight_gender=False,
