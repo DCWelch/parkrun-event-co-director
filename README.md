@@ -53,7 +53,7 @@ Modify the "EVENT DEFAULTS" in parkrun_config.py to match the parkrun you want t
     - `participants_master.csv` — summary of all parkrunners across events (generated)  
     - `event_series_summary.csv` — overall statistics across events (generated)  
 
-  - `visualizations/` — visualizations (generated)  
+  - `visualizations/` — various visualizations (generated)
     - `course_record_progression_series.csv`  
     - `course_record_progression_times.png`  
     - `course_record_progression_agegrades.png`  
