@@ -38,29 +38,53 @@ Modify the "EVENT DEFAULTS" in parkrun_config.py to match the parkrun you want t
 `python parkrun_event_data_organizer.py`
 
 ## Outputs
+After running `parkrun_event_data_organizer.py`, the tool produces the following structure:
 
-- `parkrun_event_data_organizer/` — top-level project folder
+### data/
 
-  - `data/`
-    - `event_results/` — per-event results (scraped from parkrun website)  
-      - `event_0001.csv`  
-      - `event_0002.csv`  
-      - `...`
-    - `age_group_summaries/` — per-age-group summaries for each event (generated)  
-      - `event_0001_agegroup_summary.csv`  
-      - `event_0002_agegroup_summary.csv`  
-      - `...`
-    - `participants_master.csv` — summary of all parkrunners across events (generated)  
-    - `event_series_summary.csv` — overall statistics across events (generated)  
+- participants_master.csv — all unique parkrunners across all events
+- event_series_summary.csv — event-by-event summary statistics
+- age_group_totals.csv — aggregated age-group totals
+- gender_totals.csv — aggregated gender statistics
+- top_volunteers.csv — volunteer counts ranked by frequency
+- first_timer_summary.csv — first-timer counts per event
+- pb_summary.csv — personal-best counts per event
+- volunteer_summary.csv — volunteer counts per event
+- attendance_trends.csv — long-term attendance metrics
 
-  - `visualizations/` — various visualizations (generated)
-    - `course_record_progression_series.csv`  
-    - `course_record_progression_times.png`  
-    - `course_record_progression_agegrades.png`  
-    - `event_counts_series.csv`  
-    - `runners_per_event.png`  
-    - `participants_per_event.png`  
-    - `volunteers_per_event.png`  
+#### data/event_results/ — Per-event scraped results
+- event_0001.csv
+- event_0002.csv
+- …
+
+#### data/age_group_summaries/ — Per-event age-group summaries
+- event_0001_agegroup_summary.csv
+- event_0002_agegroup_summary.csv
+- …
+
+### visualizations/
+
+- course_record_progression_series.csv
+- course_record_progression_times.png
+- course_record_progression_agegrades.png
+- course_records_chart.png
+- course_record_agegrade_chart.png
+- event_counts_series.csv
+- runners_per_event.png
+- participants_per_event.png
+- volunteers_per_event.png
+
+#### visualizations/leaderboards/ — Various Top-N Leaderboards
+- top_10_agegrades.png
+- top_10_volunteers.png
+- …
+
+#### visualizations/agegroup_course_records/ — Age Group Course Record Progressions
+- agegroup_jm10_course_record_progression_times.csv
+- agegroup_jm10_course_record_progression_times.png
+- agegroup_sw30_34_course_record_progression_times.csv
+- agegroup_sw30_34_course_record_progression_times.png
+- …
 
 ## Other Helpful Resources
 
