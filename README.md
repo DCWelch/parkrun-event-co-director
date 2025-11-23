@@ -79,7 +79,7 @@ After running `parkrun_event_data_organizer.py`, the tool produces the following
 ## Other Helpful Resources
 
 The following links send you to other helpful tools for parkrun Event Directors, Volunteer Coordinators and/or Social Media Managers:
- - https://github.com/AlanLyttonJones/Age-Grade-Tables (Age Grading)
+ - https://github.com/AlanLyttonJones/Age-Grade-Tables (Source for Age Grading)
  - https://chromewebstore.google.com/detail/parkrun-event-summary/nfdbgfodockojbhmenjohphggbokgmaf (parkrun event summaries Google Chrome Extension)
  - https://github.com/leoz0214/Parkrun-Data-Scraper (Another parkrun data tool similar to this one)
  - https://github.com/FingerLakesRunnersClub/AgeGradeCalculator (.NET Age Grading Tool)
