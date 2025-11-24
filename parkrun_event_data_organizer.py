@@ -490,7 +490,7 @@ def annotate_age_grade_extras(df: pd.DataFrame) -> pd.DataFrame:
             df.at[idx, "time"] = time_str
 
         if pd.isna(ag) or not time_str or pd.isna(age_group):
-            # optional: upgrade your skip-no-inputs logging if you want
+            # Upgrade skip-no-inputs logging
             # but the existing counters are fine
             continue
 
