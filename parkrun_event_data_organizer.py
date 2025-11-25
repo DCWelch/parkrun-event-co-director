@@ -55,7 +55,6 @@ from parkrun_config import (
     ASSETS_DIR,
 )
 
-# logger (not really config; cheap to keep local)
 log = logging.getLogger("parkrun")
 
 # Global WMA / Alan Jones standards (2010 + 2025)
